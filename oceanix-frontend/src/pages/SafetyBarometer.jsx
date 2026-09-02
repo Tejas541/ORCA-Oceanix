@@ -1,6 +1,8 @@
 import React from 'react'
 import { MapContainer, TileLayer } from 'react-leaflet'
 import { Activity, ShieldCheck, Wind, Waves, Zap, Map as MapIcon } from 'lucide-react'
+import { useScenario } from '../context/ScenarioContext'
+import { calculateSafetyScoreFromScenario } from '../utils/safetyScore'
 
 const HealthCard = ({ title, latency, health }) => (
   <div className="bg-white/80 backdrop-blur-md p-5 rounded-2xl border border-slate-100 shadow-sm">
@@ -11,7 +13,7 @@ const HealthCard = ({ title, latency, health }) => (
     <div className="flex items-end justify-between">
        <div className="space-y-1">
           <p className="text-xs font-bold text-slate-800">Latency: {latency}</p>
-          <p className="text-[10px] text-blue-500 font-medium">NRSC Ground Synced</p>
+          <p className="text-[10px] text-blue-500 font-medium">Simulated Scenario Data</p>
        </div>
        <Activity size={20} className="text-slate-200" />
     </div>
@@ -19,13 +21,17 @@ const HealthCard = ({ title, latency, health }) => (
 )
 
 export default function SafetyBarometer() {
+  const { selectedScenario: scenario } = useScenario()
+  const satelliteHealth = Object.values(scenario.satelliteHealth)
+  const safetyResult = calculateSafetyScoreFromScenario(scenario)
+
   return (
     <div className="min-h-screen bg-[#F9FAFB] pt-24 px-12 pb-12 bg-mesh">
       {/* 1. Top Health Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <HealthCard title="ISRO Oceansat-3 (OCM-3)" latency="42 min" health="98.4%" />
-        <HealthCard title="ISRO INSAT-3DR (TIR)" latency="12 min" health="99.1%" />
-        <HealthCard title="Copernicus Sentinel-3" latency="88 min" health="96.8%" />
+        {satelliteHealth.map((source) => (
+          <HealthCard key={source.title} {...source} />
+        ))}
       </div>
 
       {/* 2. Main Safety Analysis Panel */}
@@ -40,22 +46,22 @@ export default function SafetyBarometer() {
                   <ShieldCheck size={40} />
                 </div>
                 <div>
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Kochi Fishing Harbour</p>
-                  <h2 className="text-4xl font-black text-slate-900 tracking-tight">SAFE FOR VENTURE</h2>
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-1">{scenario.harbour.name}</p>
+                  <h2 className="text-4xl font-black text-slate-900 tracking-tight">{safetyResult.ventureStatusLabel}</h2>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Safety Index</p>
-                <div className="text-5xl font-black text-slate-900">74.2<span className="text-xl text-slate-300">/100</span></div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Prototype Safety Index</p>
+                <div className="text-5xl font-black text-slate-900">{safetyResult.safetyIndex}<span className="text-xl text-slate-300">/100</span></div>
               </div>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
-                { label: 'Wave Height', value: '1.03 m', icon: <Waves size={16} /> },
-                { label: 'Wind Speed', value: '14.9 kts', icon: <Wind size={16} /> },
-                { label: 'Sea State', value: 'Moderate', icon: <Activity size={16} /> },
-                { label: 'Lightning Risk', value: '24.9%', icon: <Zap size={16} /> }
+                { label: 'Wave Height', value: `${scenario.oceanConditions.waveHeight} m`, icon: <Waves size={16} /> },
+                { label: 'Wind Speed', value: `${scenario.oceanConditions.windSpeed} kts`, icon: <Wind size={16} /> },
+                { label: 'Sea State', value: scenario.oceanConditions.seaState, icon: <Activity size={16} /> },
+                { label: 'Lightning Risk', value: `${scenario.oceanConditions.lightningRiskPercent}%`, icon: <Zap size={16} /> }
               ].map((stat) => (
                 <div key={stat.label} className="bg-slate-50/50 border border-slate-100 p-5 rounded-2xl">
                   <div className="text-slate-400 mb-3">{stat.icon}</div>
@@ -67,7 +73,7 @@ export default function SafetyBarometer() {
             
             <div className="mt-10 p-4 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center gap-3">
                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping" />
-               <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Official Directive: Normal fishing and coastal navigation permitted.</p>
+                <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Demo Guidance: {scenario.risk.officialDirective}</p>
             </div>
           </div>
         </div>
@@ -79,8 +85,11 @@ export default function SafetyBarometer() {
                 <MapIcon size={16} className="text-slate-300" />
             </div>
             <div className="flex-1 rounded-[1.8rem] overflow-hidden border border-slate-100">
-                <MapContainer center={[10.0, 76.0]} zoom={8} className="h-full w-full" zoomControl={false}>
-                    <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+                <MapContainer center={scenario.harbour.coordinates} zoom={8} className="h-full w-full" zoomControl={false}>
+                    <TileLayer
+                      url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      attribution="&copy; OpenStreetMap contributors"
+                    />
                 </MapContainer>
             </div>
         </div>

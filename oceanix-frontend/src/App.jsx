@@ -28,8 +28,8 @@ const Home = () => (
         </h1>
 
         <p className="mt-8 text-lg text-slate-500 max-w-lg leading-relaxed font-medium">
-          Autonomous multi-agent platform reasoning over ISRO satellite oceanography,
-          SST-chlorophyll thermal fronts, and IMBL geofencing to empower 4 million+ coastal fishermen.
+          Prototype decision-support interface using simulated satellite-style ocean scenarios,
+          SST-chlorophyll thermal fronts, and IMBL geofencing for review demonstration.
         </p>
 
         <div className="mt-12 flex items-center gap-6">
@@ -74,7 +74,7 @@ function App() {
             <Link to="/" className="text-slate-900">Home</Link>
             <Link to="/chat" className="hover:text-slate-900">AI Chatbot</Link>
             <Link to="/gis" className="hover:text-slate-900">GIS Command</Link>
-            <Link to="/chat" className="hover:text-slate-900">Agent DAG</Link>
+            <Link to="/agents" className="hover:text-slate-900">Agent DAG</Link>
             <Link to="/safety" className="hover:text-slate-900">Safety Barometer</Link>
             <Link to="/bulletin" className="hover:text-slate-900">Advisory Bulletin</Link>
           </div>
@@ -85,7 +85,7 @@ function App() {
               <span className="text-slate-300">▼</span>
             </div>
             <button className="bg-rose-500/10 text-rose-600 border border-rose-200 px-4 py-1.5 rounded-full text-[10px] font-black flex items-center gap-2">
-              ⚠ SOS 1554
+              ⚠ SOS DEMO 1554
             </button>
           </div>
         </nav>
@@ -96,7 +96,8 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/gis" element={<GISMap />} />
           <Route path="/safety" element={<SafetyBarometer />} />
-          <Route path="/chat" element={<AgenticChat />} />
+          <Route path="/chat" element={<AgenticChat view="chat" />} />
+          <Route path="/agents" element={<AgenticChat view="agents" />} />
           <Route path="/bulletin" element={<AdvisoryBulletin />} />
         </Routes>
         {/* --- END ROUTING SECTION --- */}
