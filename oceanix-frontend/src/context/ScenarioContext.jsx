@@ -1,17 +1,30 @@
 import { createContext, useContext, useMemo, useState } from 'react'
-import { DEFAULT_SCENARIO_ID, getScenario } from '../data/mockOcean'
+import {
+  getDefaultScenarioId,
+  getMarineScenario,
+  listMarineScenariosMap,
+} from '../services/marineDataService'
 
 const ScenarioContext = createContext(null)
 
+const marineScenarios = listMarineScenariosMap()
+const defaultScenarioId = getDefaultScenarioId()
+
 export function ScenarioProvider({ children }) {
-  const [selectedScenarioId, setSelectedScenarioId] = useState(DEFAULT_SCENARIO_ID)
+  const [selectedScenarioId, setSelectedScenarioId] = useState(defaultScenarioId)
   const selectedScenario = useMemo(
-    () => getScenario(selectedScenarioId),
+    () => getMarineScenario(selectedScenarioId),
     [selectedScenarioId]
   )
 
   const value = useMemo(
-    () => ({ selectedScenarioId, selectedScenario, setSelectedScenarioId }),
+    () => ({
+      selectedScenarioId,
+      selectedScenario,
+      setSelectedScenarioId,
+      scenarios: marineScenarios,
+      defaultScenarioId,
+    }),
     [selectedScenarioId, selectedScenario]
   )
 

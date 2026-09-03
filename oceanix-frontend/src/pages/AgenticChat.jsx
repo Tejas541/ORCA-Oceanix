@@ -22,7 +22,6 @@ import {
   Sparkles,
   Square
 } from 'lucide-react'
-import { scenarios, DEFAULT_SCENARIO_ID } from '../data/mockOcean'
 import { useScenario } from '../context/ScenarioContext'
 
 // --- LANGUAGE CODE MAPPINGS FOR WEB SPEECH SYNTHESIS ---
@@ -146,7 +145,7 @@ const ProvenanceStep = ({ number, title, time, detail, subtasks, isActive, isDon
 // --- MAIN PAGE COMPONENT ---
 export default function AgenticChat({ view = 'chat' }) {
   const navigate = useNavigate()
-  const { selectedScenarioId, selectedScenario: scenario, setSelectedScenarioId } = useScenario()
+  const { selectedScenarioId, selectedScenario: scenario, setSelectedScenarioId, scenarios, defaultScenarioId } = useScenario()
 
   const [isRunning, setIsRunning] = useState(false)
   const [hasCompleted, setHasCompleted] = useState(true) // Start completed with initial scenario
@@ -159,9 +158,9 @@ export default function AgenticChat({ view = 'chat' }) {
 
   // --- 1. SINGLE CANONICAL SOURCE VARIABLE FOR FINAL DISPLAYED ADVISORY TEXT ---
   const finalDisplayedAdvisory = useMemo(() => {
-    const scenarioAdvisories = ADVISORY_TRANSLATIONS[selectedScenarioId] || ADVISORY_TRANSLATIONS[DEFAULT_SCENARIO_ID]
+    const scenarioAdvisories = ADVISORY_TRANSLATIONS[selectedScenarioId] || ADVISORY_TRANSLATIONS[defaultScenarioId]
     return scenarioAdvisories[language] || scenarioAdvisories['English']
-  }, [selectedScenarioId, language])
+  }, [selectedScenarioId, language, defaultScenarioId])
 
   const dagTimerRef = useRef([])
 

@@ -92,9 +92,11 @@ export function calculateSafetyScore({
 }
 
 export function calculateSafetyScoreFromScenario(scenario) {
+  const oceanConditions = scenario?.oceanConditions ?? {}
+  const cyclone = scenario?.cyclone ?? {}
   return calculateSafetyScore({
-    ...scenario.oceanConditions,
-    cycloneActive: scenario.cyclone.active,
-    cycloneCategory: scenario.cyclone.category,
+    ...oceanConditions,
+    cycloneActive: cyclone.active,
+    cycloneCategory: cyclone.category,
   })
 }

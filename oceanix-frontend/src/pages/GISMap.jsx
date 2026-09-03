@@ -4,7 +4,6 @@ import { Layers, Play, Pause, RotateCcw, MessageSquare, Target, ShieldAlert, Anc
 import 'leaflet/dist/leaflet.css'
 import { motion, AnimatePresence } from 'framer-motion'
 import L from 'leaflet'
-import { scenarios } from '../data/mockOcean'
 import { useScenario } from '../context/ScenarioContext'
 
 const trawlerIcon = new L.Icon({
@@ -129,7 +128,7 @@ function MapClickHandler({ onMapClick }) {
 }
 
 export default function GISMap() {
-  const { selectedScenarioId, selectedScenario: scenario, setSelectedScenarioId } = useScenario()
+  const { selectedScenarioId, selectedScenario: scenario, setSelectedScenarioId, scenarios } = useScenario()
 
   const route = scenario.trawlerRoute.coordinates
   const imblLine = scenario.imbl.coordinates
