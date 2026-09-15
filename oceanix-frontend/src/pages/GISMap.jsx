@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { MapContainer, TileLayer, Circle, CircleMarker, Polyline, Polygon, Popup, Marker, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, WMSTileLayer, Circle, CircleMarker, Polyline, Polygon, Popup, Marker, useMap, useMapEvents } from 'react-leaflet'
 import { Layers, Play, Pause, RotateCcw, MessageSquare, Target, ShieldAlert, Anchor, Compass, Send, MapPin, Sparkles, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import 'leaflet/dist/leaflet.css'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -21,6 +21,9 @@ const pinIcon = new L.DivIcon({
 const EARTH_RADIUS_NM = 3440.065
 const NM_TO_METERS = 1852
 const STEP_MS = 800
+const INCOIS_PFZ_WMS_URL = 'https://incois.gov.in/geoserver/PFZ-TUNA-SST-CHL/wms'
+const INCOIS_PFZ_WMS_CAPABILITIES_URL =
+  `${INCOIS_PFZ_WMS_URL}?SERVICE=WMS&VERSION=1.1.0&REQUEST=GetCapabilities`
 
 const SCENARIO_CENTERS = {
   kochi: { center: [10.2, 75.9], zoom: 9 },
@@ -135,7 +138,14 @@ export default function GISMap() {
   const bufferNm = scenario.imbl.bufferNm
   const bufferRing = imblBufferPolygon(imblLine, bufferNm)
 
-  const [activeLayers, setActiveLayers] = useState(['PFZ', 'IMBL', 'MPA', 'CYCLONE'])
+  const [activeLayers, setActiveLayers] = useState([
+    'PFZ',
+    'INCOIS_SST',
+    'INCOIS_CHL',
+    'IMBL',
+    'MPA',
+    'CYCLONE',
+  ])
   const [isSimulating, setIsSimulating] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
   const [boatPosition, setBoatPosition] = useState(route[0])
@@ -361,12 +371,27 @@ export default function GISMap() {
           SIMULATED EDIL DEMO DATA
         </div>
 
+        <div className="mb-4 text-[9px] leading-relaxed text-sky-700 bg-sky-50 border border-sky-100 px-2.5 py-2 rounded-lg">
+        <div className="font-black uppercase tracking-widest">Official INCOIS WMS</div>
+        <div className="mt-1">Raster context only: SST and chlorophyll layers. It does not provide point SST, wave, or current values.</div>
+        <a
+          href={INCOIS_PFZ_WMS_CAPABILITIES_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 block font-bold underline"
+        >
+          View GetCapabilities provenance
+        </a>
+        </div>
+
         <div className="space-y-2">
-          {[
-            { id: 'PFZ', label: 'PFZ Fishing Zones', color: 'bg-emerald-500', icon: <Target size={14}/> },
-            { id: 'IMBL', label: 'IMBL Border Buffer', color: 'bg-rose-500', icon: <ShieldAlert size={14}/> },
-            { id: 'MPA', label: 'MPA Eco Reserves', color: 'bg-orange-400', icon: <Anchor size={14}/> },
-            { id: 'CYCLONE', label: 'Cyclone Track', color: 'bg-blue-600', icon: <Layers size={14}/> }
+        {[
+          { id: 'PFZ', label: 'Simulated PFZ Fishing Zones', color: 'bg-emerald-500', icon: <Target size={14}/> },
+          { id: 'INCOIS_SST', label: 'Official INCOIS WMS — SST', color: 'bg-cyan-500', icon: <Layers size={14}/> },
+          { id: 'INCOIS_CHL', label: 'Official INCOIS WMS — Chlorophyll', color: 'bg-sky-500', icon: <Layers size={14}/> },
+          { id: 'IMBL', label: 'IMBL Border Buffer', color: 'bg-rose-500', icon: <ShieldAlert size={14}/> },
+          { id: 'MPA', label: 'MPA Eco Reserves', color: 'bg-orange-400', icon: <Anchor size={14}/> },
+          { id: 'CYCLONE', label: 'Cyclone Track', color: 'bg-blue-600', icon: <Layers size={14}/> }
           ].map((layer) => (
             <button 
               key={layer.id}
@@ -547,6 +572,30 @@ export default function GISMap() {
           attribution='&copy; OpenStreetMap contributors'
         />
 
+        {activeLayers.includes('INCOIS_SST') && (
+          <WMSTileLayer
+            url={INCOIS_PFZ_WMS_URL}
+            layers="sst"
+            format="image/png"
+            transparent
+            version="1.1.0"
+            opacity={0.45}
+            attribution="INCOIS PFZ-TUNA-SST-CHL WMS — sst"
+          />
+        )}
+
+        {activeLayers.includes('INCOIS_CHL') && (
+          <WMSTileLayer
+            url={INCOIS_PFZ_WMS_URL}
+            layers="chl"
+            format="image/png"
+            transparent
+            version="1.1.0"
+            opacity={0.45}
+            attribution="INCOIS PFZ-TUNA-SST-CHL WMS — chl"
+          />
+        )}
+
         {/* Harbour Origin Marker */}
         <Marker position={scenario.harbour.coordinates}>
           <Popup>
@@ -588,10 +637,11 @@ export default function GISMap() {
             >
               <Popup>
                 <div className="p-1 space-y-1">
-                  <div className="font-bold text-emerald-600 text-xs uppercase">Primary PFZ Zone</div>
+                  <div className="font-bold text-emerald-600 text-xs uppercase">Simulated Primary PFZ Zone</div>
                   <strong className="text-sm">{scenario.pfz.name}</strong>
                   <div className="text-xs text-slate-600">Target Species: <span className="font-semibold">{scenario.pfz.targetSpecies}</span></div>
                   <div className="text-xs text-slate-600">Depth: {scenario.pfz.depthMeters} m | Confidence: <span className="font-bold text-emerald-600">{scenario.pfz.confidence}%</span></div>
+                  <div className="text-[10px] text-amber-600 font-bold">Source: simulated mockOcean data</div>
                   <div className="text-[10px] text-slate-500 italic mt-1">{scenario.pfz.reason}</div>
                 </div>
               </Popup>
@@ -607,7 +657,7 @@ export default function GISMap() {
               >
                 <Popup>
                   <div className="p-1 space-y-1">
-                    <div className="font-bold text-teal-600 text-xs uppercase">Secondary PFZ Zone</div>
+                    <div className="font-bold text-teal-600 text-xs uppercase">Simulated Secondary PFZ Zone</div>
                     <strong className="text-sm">{zone.name}</strong>
                     <div className="text-xs text-slate-600">Target Species: <span className="font-semibold">{zone.targetSpecies}</span></div>
                     <div className="text-xs text-slate-600">Depth: {zone.depthMeters} m | Confidence: <span className="font-bold text-teal-600">{zone.confidence}%</span></div>
@@ -745,4 +795,3 @@ export default function GISMap() {
     </div>
   )
 }
-
