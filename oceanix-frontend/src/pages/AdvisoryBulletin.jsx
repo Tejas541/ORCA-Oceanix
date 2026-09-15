@@ -4,6 +4,7 @@ import { useScenario } from '../context/ScenarioContext'
 
 export default function AdvisoryBulletin() {
   const { selectedScenario: scenario } = useScenario()
+  const decision = scenario.decision
   const printBulletin = () => window.print()
   const pfzZones = [scenario.pfz, ...scenario.pfz.additionalZones]
 
@@ -48,7 +49,7 @@ export default function AdvisoryBulletin() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
             <div className="md:col-span-2">
                <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-2 block">Venture Status</span>
-                <h1 className="text-5xl font-black text-slate-900 mb-4 tracking-tighter">{scenario.risk.ventureStatusLabel}</h1>
+                <h1 className="text-5xl font-black text-slate-900 mb-4 tracking-tighter">{decision.ventureStatusLabel}</h1>
                 <p className="text-sm text-slate-500 leading-relaxed max-w-lg">
                   {scenario.advisory.summaryEn}
                </p>

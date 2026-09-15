@@ -146,6 +146,7 @@ const ProvenanceStep = ({ number, title, time, detail, subtasks, isActive, isDon
 export default function AgenticChat({ view = 'chat' }) {
   const navigate = useNavigate()
   const { selectedScenarioId, selectedScenario: scenario, setSelectedScenarioId, scenarios, defaultScenarioId } = useScenario()
+  const decision = scenario.decision
 
   const [isRunning, setIsRunning] = useState(false)
   const [hasCompleted, setHasCompleted] = useState(true) // Start completed with initial scenario
@@ -355,15 +356,15 @@ export default function AgenticChat({ view = 'chat' }) {
         number: 3,
         title: "Weather & Marine Hazard Stage",
         time: "6.9",
-        detail: `Wave Height: ${scenario.oceanConditions.waveHeight}m, Wind: ${scenario.oceanConditions.windSpeed} kts (${scenario.oceanConditions.windDirection}). Lightning: ${scenario.oceanConditions.lightningRiskPercent}%. Status: ${scenario.risk.riskLevel}.`,
-        subtasks: [scenario.risk.ventureStatusLabel, scenario.cyclone.active ? `Warning: ${scenario.cyclone.name}` : "No active cyclone threat"],
+        detail: `Wave Height: ${scenario.oceanConditions.waveHeight}m, Wind: ${scenario.oceanConditions.windSpeed} kts (${scenario.oceanConditions.windDirection}). Lightning: ${scenario.oceanConditions.lightningRiskPercent}%. Status: ${decision.riskLevel}.`,
+        subtasks: [decision.ventureStatusLabel, scenario.cyclone.active ? `Warning: ${scenario.cyclone.name}` : "No active cyclone threat"],
         confidence: 97.5
       },
       {
         number: 4,
         title: "PFZ Scenario Stage",
         time: "14.2",
-        detail: scenario.risk.riskLevel === 'UNSAFE_NO_VENTURE'
+        detail: decision.riskLevel === 'UNSAFE_NO_VENTURE'
           ? `PFZ recommendation withheld. Cyclone ${scenario.cyclone.name} override active for maritime safety.`
           : `Scenario values show a thermal-front gradient (|∇SST|: ${scenario.oceanParameters.sstGradient}°C/10km) and PFZ: '${scenario.pfz.name}'.`,
         subtasks: [
@@ -421,21 +422,21 @@ export default function AgenticChat({ view = 'chat' }) {
             >
               {Object.values(scenarios).map(sc => (
                 <option key={sc.id} value={sc.id}>
-                  {sc.label} ({sc.risk.riskLevel === 'SAFE_FOR_VENTURE' ? '🟢 SAFE' : sc.risk.riskLevel === 'CAUTION' ? '🟡 CAUTION' : '🔴 NO VENTURE'})
+                  {sc.label} ({sc.decision.riskLevel === 'SAFE_FOR_VENTURE' ? '🟢 SAFE' : sc.decision.riskLevel === 'CAUTION' ? '🟡 CAUTION' : '🔴 NO VENTURE'})
                 </option>
               ))}
             </select>
           </div>
 
           <div className={`px-3 py-1 rounded-full text-[9px] font-black tracking-wider uppercase shadow-sm flex items-center gap-1.5 ${
-            scenario.risk.riskLevel === 'SAFE_FOR_VENTURE' 
+            decision.riskLevel === 'SAFE_FOR_VENTURE' 
               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-              : scenario.risk.riskLevel === 'CAUTION' 
+              : decision.riskLevel === 'CAUTION' 
               ? 'bg-amber-50 text-amber-700 border border-amber-200' 
               : 'bg-rose-50 text-rose-700 border border-rose-200'
           }`}>
-            {scenario.risk.riskLevel === 'SAFE_FOR_VENTURE' ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
-            {scenario.risk.ventureStatusLabel}
+            {decision.riskLevel === 'SAFE_FOR_VENTURE' ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+            {decision.ventureStatusLabel}
           </div>
         </div>
 
@@ -505,7 +506,7 @@ export default function AgenticChat({ view = 'chat' }) {
               >
                 {/* Glowing background accent */}
                 <div className={`absolute -top-24 -right-24 w-64 h-64 blur-[100px] rounded-full pointer-events-none ${
-                  scenario.risk.riskLevel === 'SAFE_FOR_VENTURE' ? 'bg-emerald-500/10' : scenario.risk.riskLevel === 'CAUTION' ? 'bg-amber-500/10' : 'bg-rose-500/10'
+                  decision.riskLevel === 'SAFE_FOR_VENTURE' ? 'bg-emerald-500/10' : decision.riskLevel === 'CAUTION' ? 'bg-amber-500/10' : 'bg-rose-500/10'
                 }`} />
 
                 <div className="flex justify-between items-start mb-6 relative z-10">
@@ -535,13 +536,13 @@ export default function AgenticChat({ view = 'chat' }) {
 
                   <div className="text-right">
                     <div className={`text-[10px] font-bold px-2.5 py-1 rounded-md border inline-block mb-2 ${
-                      scenario.risk.riskLevel === 'SAFE_FOR_VENTURE'
+                      decision.riskLevel === 'SAFE_FOR_VENTURE'
                         ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                        : scenario.risk.riskLevel === 'CAUTION'
+                        : decision.riskLevel === 'CAUTION'
                         ? 'text-amber-700 bg-amber-50 border-amber-200'
                         : 'text-rose-700 bg-rose-50 border-rose-200'
                     }`}>
-                      SAFETY SCORE: {scenario.risk.safetyScore}/100
+                      SAFETY SCORE: {decision.safetyScore}/100
                     </div>
                     <button
                       onClick={toggleSpeech}
@@ -571,18 +572,18 @@ export default function AgenticChat({ view = 'chat' }) {
 
                 {/* Directive Banner */}
                 <div className={`mt-6 p-4 rounded-xl border flex items-center gap-3 text-xs font-bold ${
-                  scenario.risk.riskLevel === 'SAFE_FOR_VENTURE'
+                  decision.riskLevel === 'SAFE_FOR_VENTURE'
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : scenario.risk.riskLevel === 'CAUTION'
+                    : decision.riskLevel === 'CAUTION'
                     ? 'bg-amber-50 text-amber-800 border-amber-200'
                     : 'bg-rose-50 text-rose-800 border-rose-200'
                 }`}>
                   <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                    scenario.risk.riskLevel === 'SAFE_FOR_VENTURE' ? 'bg-emerald-500' : scenario.risk.riskLevel === 'CAUTION' ? 'bg-amber-500' : 'bg-rose-500 animate-ping'
+                    decision.riskLevel === 'SAFE_FOR_VENTURE' ? 'bg-emerald-500' : decision.riskLevel === 'CAUTION' ? 'bg-amber-500' : 'bg-rose-500 animate-ping'
                   }`} />
                   <div>
                     <span className="uppercase text-[9px] block text-slate-500 font-black">Demo Guidance</span>
-                    {scenario.risk.officialDirective}
+                    {decision.officialDirective}
                   </div>
                 </div>
 

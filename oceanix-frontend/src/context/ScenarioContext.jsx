@@ -21,6 +21,7 @@ export function ScenarioProvider({ children }) {
     () => ({
       selectedScenarioId,
       selectedScenario,
+      selectedDecision: selectedScenario?.decision ?? null,
       setSelectedScenarioId,
       scenarios: marineScenarios,
       defaultScenarioId,

@@ -132,6 +132,7 @@ function MapClickHandler({ onMapClick }) {
 
 export default function GISMap() {
   const { selectedScenarioId, selectedScenario: scenario, setSelectedScenarioId, scenarios } = useScenario()
+  const decision = scenario.decision
 
   const route = scenario.trawlerRoute.coordinates
   const imblLine = scenario.imbl.coordinates
@@ -280,7 +281,7 @@ export default function GISMap() {
     } else if (q.includes('imbl') || q.includes('border') || q.includes('geofence') || q.includes('buffer')) {
       responseText = `Demo IMBL boundary is ${scenario.imbl.distanceFromHarbourNm} NM from harbour. Active vessel distance: ${liveImblNm.toFixed(1)} NM. Status: ${liveImblNm <= scenario.imbl.bufferNm ? '⚠️ INSIDE BUFFER ZONE' : '✅ SAFE COMPLIANCE'}.`
     } else if (q.includes('safety') || q.includes('score') || q.includes('venture') || q.includes('risk')) {
-      responseText = `Safety Index for ${scenario.label}: ${scenario.risk.safetyScore}/100 (${scenario.risk.riskLevel}). Status: ${scenario.risk.ventureStatusLabel}. Directive: ${scenario.risk.officialDirective}`
+      responseText = `Safety Index for ${scenario.label}: ${decision.safetyScore}/100 (${decision.riskLevel}). Status: ${decision.ventureStatusLabel}. Directive: ${decision.officialDirective}`
     } else {
       responseText = `[${scenario.region}] ${scenario.advisory.summaryEn}`
     }
@@ -302,7 +303,7 @@ export default function GISMap() {
     const distHarbour = haversineNm(coords, scenario.harbour.coordinates)
     const distImbl = distanceToPolylineNm(coords, imblLine)
 
-    const locMsgText = `Inspecting Location [${coords[0].toFixed(4)}°N, ${coords[1].toFixed(4)}°E]: ${distHarbour.toFixed(1)} NM from ${scenario.harbour.name}, ${distImbl.toFixed(1)} NM from demo IMBL. Composite Safety Score: ${scenario.risk.safetyScore}/100.`
+    const locMsgText = `Inspecting Location [${coords[0].toFixed(4)}°N, ${coords[1].toFixed(4)}°E]: ${distHarbour.toFixed(1)} NM from ${scenario.harbour.name}, ${distImbl.toFixed(1)} NM from demo IMBL. Composite Safety Score: ${decision.safetyScore}/100.`
 
     const userMsg = {
       id: Date.now(),
@@ -339,7 +340,7 @@ export default function GISMap() {
             >
               {Object.values(scenarios).map(sc => (
                 <option key={sc.id} value={sc.id}>
-                  {sc.label} ({sc.risk.riskLevel === 'SAFE_FOR_VENTURE' ? '🟢 SAFE' : sc.risk.riskLevel === 'CAUTION' ? '🟡 CAUTION' : '🔴 NO VENTURE'})
+                  {sc.label} ({sc.decision.riskLevel === 'SAFE_FOR_VENTURE' ? '🟢 SAFE' : sc.decision.riskLevel === 'CAUTION' ? '🟡 CAUTION' : '🔴 NO VENTURE'})
                 </option>
               ))}
             </select>
@@ -347,14 +348,14 @@ export default function GISMap() {
         </div>
 
         <div className={`px-3 py-1.5 rounded-full text-[10px] font-black tracking-wider uppercase shadow-md flex items-center gap-1.5 ${
-          scenario.risk.riskLevel === 'SAFE_FOR_VENTURE' 
+          decision.riskLevel === 'SAFE_FOR_VENTURE' 
             ? 'bg-emerald-500 text-white' 
-            : scenario.risk.riskLevel === 'CAUTION' 
+            : decision.riskLevel === 'CAUTION' 
             ? 'bg-amber-500 text-white' 
             : 'bg-rose-600 text-white'
         }`}>
-          {scenario.risk.riskLevel === 'SAFE_FOR_VENTURE' ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
-          {scenario.risk.ventureStatusLabel}
+          {decision.riskLevel === 'SAFE_FOR_VENTURE' ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+          {decision.ventureStatusLabel}
         </div>
       </div>
 
@@ -535,9 +536,9 @@ export default function GISMap() {
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-slate-400 uppercase">Safety Index</span>
           <span className={`text-xs font-black ${
-            scenario.risk.safetyScore >= 70 ? 'text-emerald-600' : scenario.risk.safetyScore >= 50 ? 'text-amber-600' : 'text-rose-600'
+            decision.safetyScore >= 70 ? 'text-emerald-600' : decision.safetyScore >= 50 ? 'text-amber-600' : 'text-rose-600'
           }`}>
-            {scenario.risk.safetyScore}/100
+            {decision.safetyScore}/100
           </span>
         </div>
         <div className="w-px h-6 bg-slate-200 shrink-0" />
