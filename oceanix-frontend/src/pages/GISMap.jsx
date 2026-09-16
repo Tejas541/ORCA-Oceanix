@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css'
 import { motion, AnimatePresence } from 'framer-motion'
 import L from 'leaflet'
 import { useScenario } from '../context/ScenarioContext'
-import { fetchIncoisPfz } from '../services/incoisService'
+import { fetchIncoisPfz, fetchIncoisWave } from '../services/incoisService'
 
 const trawlerIcon = new L.Icon({
   iconUrl: 'https://cdn-icons-png.flaticon.com/512/2942/2942940.png',
@@ -167,6 +167,7 @@ export default function GISMap() {
   const [routeIndex, setRouteIndex] = useState(0)
   const [notifications, setNotifications] = useState([])
   const [officialPfz, setOfficialPfz] = useState(null)
+  const [officialWave, setOfficialWave] = useState(null)
   const [clickedLocation, setClickedLocation] = useState(null)
   const [chatInput, setChatInput] = useState('')
   const [chatMessages, setChatMessages] = useState([
@@ -201,6 +202,30 @@ export default function GISMap() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    let active = true
+    const [latitude, longitude] = scenario.harbour.coordinates
+    fetchIncoisWave({ latitude, longitude })
+      .then((result) => {
+        if (active) setOfficialWave(result)
+      })
+      .catch(() => {
+        if (active) {
+          setOfficialWave({
+            status: 'unavailable',
+            source: { provider: 'INCOIS' },
+            provenance: { sourceDataStatus: 'unavailable' },
+            data: null,
+            reason: 'source_unavailable',
+          })
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [scenario.harbour.coordinates])
 
   const officialPfzLines = useMemo(() => {
     if (officialPfz?.status !== 'available') return []
@@ -437,6 +462,20 @@ export default function GISMap() {
             {officialPfz?.status === 'available'
               ? `Advisory geometry available${officialPfz.advisoryDate ? ` for ${officialPfz.advisoryDate}` : ''}.`
               : 'PFZ advisory unavailable; no demo fallback is used.'}
+          </div>
+        </div>
+
+        <div className="mb-4 text-[9px] leading-relaxed text-violet-700 bg-violet-50 border border-violet-100 px-2.5 py-2 rounded-lg">
+          <div className="font-black uppercase tracking-widest">
+            Official INCOIS Significant Wave Height
+          </div>
+          <div className="mt-1">
+            {officialWave?.status === 'available' && officialWave.data
+              ? `${officialWave.data.waveHeight} ${officialWave.data.unit} forecast for ${officialWave.data.forecastTime}.`
+              : 'Wave forecast unavailable; no demo fallback is used.'}
+          </div>
+          <div className="mt-1 text-violet-600">
+            Forecast source data is separate from simulated demo layers.
           </div>
         </div>
 

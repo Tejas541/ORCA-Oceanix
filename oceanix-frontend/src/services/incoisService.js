@@ -45,6 +45,40 @@ export async function fetchIncoisPfz() {
     return result
 }
 
+export async function fetchIncoisWave({ latitude, longitude, time } = {}) {
+    const params = new URLSearchParams({
+        latitude: String(latitude),
+        longitude: String(longitude),
+        ...(time ? { time } : {}),
+    })
+    const response = await fetch(
+        `${ORCA_BACKEND_BASE}/api/incois/wave?${params.toString()}`
+    )
+
+    if (!response.ok) {
+        throw new IncoisOrcaRequestError(
+            `ORCA backend returned HTTP ${response.status}`,
+            { status: response.status }
+        )
+    }
+
+    const result = await response.json()
+    if (
+        !result ||
+        !result.status ||
+        !result.source ||
+        !result.provenance ||
+        !Array.isArray(result.evidence) ||
+        !result.decision
+    ) {
+        throw new IncoisOrcaRequestError(
+            'ORCA backend returned an incomplete wave response'
+        )
+    }
+
+    return result
+}
+
 /**
  * Fetch the canonical INCOIS ORCA response through the backend.
  *

@@ -58,3 +58,59 @@ test('PFZ route preserves unavailable status', async () => {
     assert.equal(body.data, null)
   })
 })
+
+test('wave route validates coordinates and returns canonical wave response', async () => {
+  const result = {
+    status: 'available',
+    source: { provider: 'INCOIS' },
+    retrievedAt: '2026-09-16T07:00:00.000Z',
+    location: [17, 83],
+    data: {
+      waveHeight: 0.8454,
+      unit: 'm',
+      forecastTime: '2026-09-16T00:00:00.000Z',
+    },
+    evidence: [{ parameter: 'waveHeight', value: 0.8454 }],
+    aggregation: { availableParameters: ['waveHeight'] },
+    decision: { riskLevel: 'DATA_INSUFFICIENT', safetyScore: null },
+    provenance: { sourceDataStatus: 'forecast' },
+  }
+  const requests = []
+
+  await withServer(createIncoisRouter({
+    getWave: async (options) => {
+      requests.push(options)
+      return result
+    },
+  }), async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/incois/wave?lat=17&lon=83&time=2026-09-16T00%3A00%3A00Z`
+    )
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), result)
+  })
+
+  assert.deepEqual(requests, [{
+    latitude: 17,
+    longitude: 83,
+    time: '2026-09-16T00:00:00Z',
+    timeStart: undefined,
+    timeEnd: undefined,
+  }])
+})
+
+test('wave route rejects missing coordinates', async () => {
+  await withServer(createIncoisRouter({
+    getWave: async () => {
+      const error = new Error('Valid latitude and longitude are required')
+      error.status = 400
+      error.code = 'INVALID_COORDINATES'
+      throw error
+    },
+  }), async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/incois/wave?lat=17`)
+    const body = await response.json()
+    assert.equal(response.status, 400)
+    assert.equal(body.error.code, 'INVALID_COORDINATES')
+  })
+})
