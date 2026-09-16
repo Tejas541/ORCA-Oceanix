@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   getMarineScenario,
+  getMarineScenarioWithIncois,
   listMarineScenariosMap,
 } from './marineDataService.js'
 
@@ -37,4 +38,87 @@ test('canonical decisions exist for Chennai and Bay of Bengal', () => {
   assert.equal(chennai.decision.riskLevel, 'CAUTION')
   assert.equal(bayOfBengal.decision.safetyScore, 9.2)
   assert.equal(bayOfBengal.decision.riskLevel, 'UNSAFE_NO_VENTURE')
+})
+
+test('historical INCOIS enrichment keeps displayed data and decision inputs consistent', async () => {
+  const originalFetch = globalThis.fetch
+  const canonicalEvidence = [
+    {
+      parameter: 'waveHeight',
+      value: 1.8,
+      status: 'available',
+      isLive: true,
+      validation: 'valid',
+    },
+    {
+      parameter: 'windSpeed',
+      value: null,
+      status: 'unavailable',
+      isLive: false,
+      validation: 'missing',
+    },
+    {
+      parameter: 'visibility',
+      value: null,
+      status: 'unavailable',
+      isLive: false,
+      validation: 'missing',
+    },
+    {
+      parameter: 'lightningRiskPercent',
+      value: null,
+      status: 'unavailable',
+      isLive: false,
+      validation: 'missing',
+    },
+    {
+      parameter: 'cyclone',
+      value: null,
+      status: 'unavailable',
+      isLive: false,
+      validation: 'missing',
+    },
+  ]
+  let requestedUrl
+  globalThis.fetch = async (url) => {
+    requestedUrl = url
+    return {
+    ok: true,
+    async json() {
+      return {
+        source: {
+          source: 'INCOIS ERDDAP',
+          status: 'partial',
+        },
+        evidence: canonicalEvidence,
+        aggregation: {
+          status: 'partial',
+          sourceStatus: 'live',
+          isLive: false,
+          complete: false,
+          missingParameters: ['windSpeed', 'visibility', 'lightningRiskPercent', 'cyclone'],
+        },
+        decision: {
+          safetyScore: null,
+          riskLevel: 'DATA_INSUFFICIENT',
+          evidence: canonicalEvidence,
+        },
+      }
+    },
+    }
+  }
+
+  try {
+    const scenario = await getMarineScenarioWithIncois('kochi')
+
+    assert.match(requestedUrl, /\/api\/orca\/incois\?/)
+    assert.equal(scenario.oceanConditions.windSpeed, 14.9)
+    assert.equal(scenario.decision.riskLevel, 'DATA_INSUFFICIENT')
+    assert.equal(scenario.decision.safetyScore, null)
+    assert.deepEqual(scenario.evidence, canonicalEvidence)
+    assert.deepEqual(scenario.decision.evidence, canonicalEvidence)
+    assert.equal(scenario.evidenceAggregation.missingParameters.includes('windSpeed'), true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

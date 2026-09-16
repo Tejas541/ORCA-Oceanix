@@ -2,6 +2,7 @@ import cors from 'cors'
 import express from 'express'
 import imdRoutes from './routes/imdRoutes.js'
 import marineRoutes from './routes/marineRoutes.js'
+import orcaRoutes from './routes/orcaRoutes.js'
 import { fetchIncoisObservation } from './services/incoisService.js'
 
 const app = express()
@@ -18,6 +19,7 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.use('/api/marine', marineRoutes)
+app.use('/api/orca', orcaRoutes)
 app.use('/api/imd', imdRoutes)
 
 // Backward-compatible wind endpoint for the existing frontend helper.

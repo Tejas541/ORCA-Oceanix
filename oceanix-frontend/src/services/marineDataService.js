@@ -13,7 +13,7 @@
  * No live fetches in this phase. All methods are synchronous and deterministic.
  */
 
-import { fetchIncoisWindObservation } from './incoisService.js'
+import { fetchIncoisOrcaDecision } from './incoisService.js'
 import { DEFAULT_SCENARIO_ID, getScenario, scenarios as rawScenarios } from '../data/mockOcean.js'
 import { normalizeMarineData } from '../utils/normalizeMarineData.js'
 import { evaluateOrcaDecision } from '../../../shared/orcaDecisionEngine.js'
@@ -72,23 +72,11 @@ export function listMarineScenarios() {
 }
 
 /**
- * Convert metres per second to knots.
+ * Get the canonical ORCA response for an INCOIS-backed scenario.
  *
- * 1 m/s = 1.943844 knots
- */
-function metersPerSecondToKnots(value) {
-  return Number(value) * 1.943844
-}
-
-/**
- * Get a normalized scenario enriched with a real INCOIS wind observation.
- *
- * Falls back to the existing normalized demo scenario when INCOIS
- * is unavailable.
- *
- * The existing ORCA windSpeed field uses knots, while INCOIS
- * ASCAT provides metres per second, so the external value is
- * converted before being placed into oceanConditions.windSpeed.
+ * The backend owns live-source evidence creation, aggregation, and
+ * decision evaluation. Backend failures are surfaced rather than replaced
+ * with simulated scenario decisions.
  *
  * @param {string} [scenarioId]
  * @returns {Promise<object>}
@@ -107,42 +95,19 @@ export async function getMarineScenarioWithIncois(
   }
 
   const [latitude, longitude] = coordinates
-
-  const observation = await fetchIncoisWindObservation({
+  const canonical = await fetchIncoisOrcaDecision({
     latitude,
     longitude,
   })
 
-  if (!observation) {
-    return baseScenario
-  }
-
-  const windSpeedMps = Number(observation.windSpeedMps)
-
-  if (!Number.isFinite(windSpeedMps)) {
-    return baseScenario
-  }
-
-  const windSpeedKnots = metersPerSecondToKnots(windSpeedMps)
-
   return {
     ...baseScenario,
-
-    oceanConditions: {
-      ...baseScenario.oceanConditions,
-
-      // ORCA's existing windSpeed field is in knots.
-      windSpeed: windSpeedKnots,
-    },
-
     externalData: {
       ...(baseScenario.externalData ?? {}),
-
-      incois: {
-        ...observation,
-        windSpeedMps,
-        windSpeedKnots,
-      },
+      incois: canonical.source,
     },
+    evidence: canonical.evidence,
+    evidenceAggregation: canonical.aggregation,
+    decision: canonical.decision,
   }
 }
