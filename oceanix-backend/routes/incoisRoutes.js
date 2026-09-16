@@ -1,6 +1,7 @@
 import express from 'express'
 import { fetchIncoisPfz } from '../services/incoisPfzService.js'
 import { fetchIncoisWave } from '../services/incoisWaveService.js'
+import { fetchIncoisWind } from '../services/incoisWindService.js'
 
 function parseCoordinate(value) {
   if (value === undefined || value === '') return NaN
@@ -10,6 +11,7 @@ function parseCoordinate(value) {
 export function createIncoisRouter({
   getPfz = fetchIncoisPfz,
   getWave = fetchIncoisWave,
+  getWind = fetchIncoisWind,
 } = {}) {
   const router = express.Router()
 
@@ -35,6 +37,30 @@ export function createIncoisRouter({
       return res.status(error.status ?? 502).json({
         error: {
           code: error.code ?? 'INCOIS_WAVE_REQUEST_FAILED',
+          message: error.message,
+          status: error.status ?? 502,
+        },
+      })
+    }
+  })
+
+  router.get('/wind', async (req, res) => {
+    const latitude = parseCoordinate(req.query.lat ?? req.query.latitude)
+    const longitude = parseCoordinate(req.query.lon ?? req.query.longitude)
+
+    try {
+      const result = await getWind({
+        latitude,
+        longitude,
+        time: req.query.time,
+        timeStart: req.query.timeStart,
+        timeEnd: req.query.timeEnd,
+      })
+      return res.json(result)
+    } catch (error) {
+      return res.status(error.status ?? 502).json({
+        error: {
+          code: error.code ?? 'INCOIS_WIND_REQUEST_FAILED',
           message: error.message,
           status: error.status ?? 502,
         },

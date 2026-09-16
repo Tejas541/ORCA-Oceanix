@@ -114,3 +114,44 @@ test('wave route rejects missing coordinates', async () => {
     assert.equal(body.error.code, 'INVALID_COORDINATES')
   })
 })
+
+test('wind route returns the structured official forecast response', async () => {
+  const result = {
+    status: 'available',
+    isLive: false,
+    source: { provider: 'INCOIS' },
+    retrievedAt: '2026-09-16T07:00:00.000Z',
+    location: [17, 83],
+    data: {
+      windSpeed: 4.747726,
+      unit: 'm/s',
+      forecastTime: '2026-09-16T00:00:00.000Z',
+    },
+    evidence: [{ parameter: 'windSpeed', value: 4.747726 }],
+    aggregation: { availableParameters: ['windSpeed'] },
+    decision: { riskLevel: 'DATA_INSUFFICIENT', safetyScore: null },
+    provenance: { sourceDataStatus: 'forecast' },
+  }
+  const requests = []
+
+  await withServer(createIncoisRouter({
+    getWind: async (options) => {
+      requests.push(options)
+      return result
+    },
+  }), async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/incois/wind?lat=17&lon=83&time=2026-09-16T00%3A00%3A00Z`
+    )
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), result)
+  })
+
+  assert.deepEqual(requests, [{
+    latitude: 17,
+    longitude: 83,
+    time: '2026-09-16T00:00:00Z',
+    timeStart: undefined,
+    timeEnd: undefined,
+  }])
+})
