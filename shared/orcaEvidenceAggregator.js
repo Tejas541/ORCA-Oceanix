@@ -57,6 +57,41 @@ function comparableValue(record) {
   })
 }
 
+function mergedStatus(records) {
+  if (records.every(isUsable)) {
+    return records.every((record) => record.status === 'available')
+      ? 'available'
+      : 'simulated'
+  }
+
+  if (records.some((record) => record.status === 'invalid')) return 'invalid'
+  if (records.some((record) => record.status === 'stale')) return 'stale'
+  return 'unavailable'
+}
+
+function mergedValidation(records) {
+  if (records.some((record) => record.validation === 'invalid')) return 'invalid'
+  if (records.some((record) => record.validation === 'missing')) return 'missing'
+  if (records.some((record) => record.validation === 'conflict')) return 'conflict'
+  return 'valid'
+}
+
+function mergeEquivalentRecords(records) {
+  const sorted = [...records].sort((left, right) =>
+    recordSortKey(left).localeCompare(recordSortKey(right))
+  )
+  const merged = stableClone(sorted[0])
+  const status = mergedStatus(sorted)
+
+  return {
+    ...merged,
+    status,
+    isLive: status === 'available' &&
+      sorted.every((record) => record.status === 'available' && record.isLive === true),
+    validation: mergedValidation(sorted),
+  }
+}
+
 function unavailableRecord(parameter, reason) {
   return {
     evidenceId: null,
@@ -118,10 +153,9 @@ function aggregateParameter(parameter, records) {
   const sorted = [...records].sort((left, right) =>
     recordSortKey(left).localeCompare(recordSortKey(right))
   )
-  const usable = sorted.filter(isUsable)
   const candidateGroups = new Map()
 
-  for (const record of usable) {
+  for (const record of sorted) {
     const key = comparableValue(record)
     const group = candidateGroups.get(key) ?? []
     group.push(record)
@@ -130,15 +164,21 @@ function aggregateParameter(parameter, records) {
 
   const candidateValues = [...candidateGroups.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
+  const usableCandidates = candidateValues.filter(([, candidates]) =>
+    candidates.some(isUsable)
+  )
 
-  if (candidateValues.length > 1) {
+  if (usableCandidates.length > 1) {
+    const usable = usableCandidates.flatMap(([, candidates]) =>
+      candidates.filter(isUsable)
+    )
     return {
       canonical: conflictRecord(parameter),
       duplicate: false,
       conflict: {
         parameter,
         evidenceIds: usable.map((record) => record.evidenceId ?? null),
-        candidates: candidateValues.map(([, candidates]) => ({
+        candidates: usableCandidates.map(([, candidates]) => ({
           evidenceIds: candidates.map((record) => record.evidenceId ?? null),
           unit: candidates[0].unit ?? null,
           value: stableClone(candidates[0].value),
@@ -147,10 +187,10 @@ function aggregateParameter(parameter, records) {
     }
   }
 
-  if (candidateValues.length === 1) {
-    const [, candidates] = candidateValues[0]
+  if (candidateValues.length > 0) {
+    const [, candidates] = usableCandidates[0] ?? candidateValues[0]
     return {
-      canonical: stableClone(candidates[0]),
+      canonical: mergeEquivalentRecords(candidates),
       duplicate: candidates.length > 1,
       conflict: null,
     }

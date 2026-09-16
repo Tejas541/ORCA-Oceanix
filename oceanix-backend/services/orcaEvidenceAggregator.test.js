@@ -32,6 +32,7 @@ function evidenceRecord({
   retrievedAt = '2026-09-16T00:00:00Z',
   validation = 'valid',
   location = [9.9, 76.2],
+  quality = {},
 } = {}) {
   return createEvidenceRecord({
     provider,
@@ -47,6 +48,7 @@ function evidenceRecord({
     status,
     isLive,
     validation,
+    quality,
   })
 }
 
@@ -112,6 +114,110 @@ test('multiple sources preserve all provenance', () => {
   )
 })
 
+test('identical live records merge as live and preserve provenance', () => {
+  const records = [
+    evidenceRecord({ parameter: 'waveHeight', value: 1.8, provider: 'source-a' }),
+    evidenceRecord({ parameter: 'waveHeight', value: 1.8, provider: 'source-b' }),
+  ]
+  const result = aggregateEvidence(records)
+  const canonical = result.evidence.find((record) => record.parameter === 'waveHeight')
+
+  assert.equal(canonical.status, 'available')
+  assert.equal(canonical.isLive, true)
+  assert.deepEqual(
+    result.aggregation.provenance.byParameter.waveHeight.sort(),
+    records.map((record) => record.evidenceId).sort()
+  )
+})
+
+test('identical simulated records merge as simulated and non-live', () => {
+  const records = [
+    evidenceRecord({
+      parameter: 'waveHeight',
+      value: 1.8,
+      provider: 'source-a',
+      status: 'simulated',
+      isLive: false,
+    }),
+    evidenceRecord({
+      parameter: 'waveHeight',
+      value: 1.8,
+      provider: 'source-b',
+      status: 'simulated',
+      isLive: false,
+    }),
+  ]
+  const result = aggregateEvidence(records)
+  const canonical = result.evidence.find((record) => record.parameter === 'waveHeight')
+
+  assert.equal(canonical.status, 'simulated')
+  assert.equal(canonical.isLive, false)
+})
+
+test('identical live and simulated records merge conservatively as simulated', () => {
+  const records = [
+    evidenceRecord({ parameter: 'waveHeight', value: 1.8, provider: 'live-source' }),
+    evidenceRecord({
+      parameter: 'waveHeight',
+      value: 1.8,
+      provider: 'simulated-source',
+      status: 'simulated',
+      isLive: false,
+    }),
+  ]
+  const result = aggregateEvidence(records)
+  const canonical = result.evidence.find((record) => record.parameter === 'waveHeight')
+
+  assert.equal(canonical.status, 'simulated')
+  assert.equal(canonical.isLive, false)
+  assert.equal(result.aggregation.sourceStatus, 'mixed')
+})
+
+test('identical usable and unavailable records merge as unavailable', () => {
+  const records = [
+    evidenceRecord({ parameter: 'waveHeight', value: 1.8, provider: 'live-source' }),
+    {
+      ...evidenceRecord({ parameter: 'waveHeight', value: 1.8, provider: 'unavailable-source' }),
+      status: 'unavailable',
+      isLive: false,
+    },
+  ]
+  const result = aggregateEvidence(records)
+  const canonical = result.evidence.find((record) => record.parameter === 'waveHeight')
+
+  assert.equal(canonical.status, 'unavailable')
+  assert.equal(canonical.isLive, false)
+  assert.equal(result.aggregation.missingParameters.includes('waveHeight'), true)
+})
+
+test('equivalent records preserve distinct provenance and quality metadata', () => {
+  const records = [
+    evidenceRecord({
+      parameter: 'waveHeight',
+      value: 1.8,
+      provider: 'source-a',
+      quality: { sourceLabel: 'A' },
+    }),
+    evidenceRecord({
+      parameter: 'waveHeight',
+      value: 1.8,
+      provider: 'source-b',
+      quality: { sourceLabel: 'B' },
+    }),
+  ]
+  const result = aggregateEvidence(records)
+  const provenance = result.aggregation.provenance.records
+
+  assert.deepEqual(
+    provenance.map((record) => record.quality.sourceLabel).sort(),
+    ['A', 'B']
+  )
+  assert.deepEqual(
+    result.aggregation.provenance.byParameter.waveHeight.sort(),
+    records.map((record) => record.evidenceId).sort()
+  )
+})
+
 test('identical duplicate records collapse deterministically', () => {
   const record = evidenceRecord({ parameter: 'waveHeight', value: 1.8 })
   const first = aggregateEvidence([record, { ...record }])
@@ -119,6 +225,24 @@ test('identical duplicate records collapse deterministically', () => {
 
   assert.deepEqual(first, second)
   assert.deepEqual(first.aggregation.duplicateParameters, ['waveHeight'])
+})
+
+test('equivalent merge is independent of input order', () => {
+  const records = [
+    evidenceRecord({ parameter: 'waveHeight', value: 1.8, provider: 'source-a' }),
+    evidenceRecord({
+      parameter: 'waveHeight',
+      value: 1.8,
+      provider: 'source-b',
+      status: 'simulated',
+      isLive: false,
+    }),
+  ]
+
+  assert.deepEqual(
+    aggregateEvidence(records),
+    aggregateEvidence([...records].reverse())
+  )
 })
 
 test('conflicting values become unusable without selecting a provider', () => {
@@ -137,6 +261,20 @@ test('conflicting values become unusable without selecting a provider', () => {
     records.map((record) => record.evidenceId).sort()
   )
   assert.equal(result.aggregation.missingParameters.includes('waveHeight'), true)
+})
+
+test('unusable merged evidence remains DATA_INSUFFICIENT', () => {
+  const evidence = completeEvidence().map((record) =>
+    record.parameter === 'waveHeight'
+      ? { ...record, status: 'unavailable', isLive: false }
+      : record
+  )
+  const result = aggregateEvidence(evidence)
+  const decision = evaluateOrcaDecision({ evidence: result.evidence })
+
+  assert.equal(result.evidence.find((record) => record.parameter === 'waveHeight').status, 'unavailable')
+  assert.equal(decision.riskLevel, 'DATA_INSUFFICIENT')
+  assert.equal(decision.safetyScore, null)
 })
 
 test('missing evidence remains unavailable', () => {
