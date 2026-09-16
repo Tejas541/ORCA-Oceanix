@@ -16,13 +16,19 @@
 import { fetchIncoisWindObservation } from './incoisService.js'
 import { DEFAULT_SCENARIO_ID, getScenario, scenarios as rawScenarios } from '../data/mockOcean.js'
 import { normalizeMarineData } from '../utils/normalizeMarineData.js'
-import { evaluateScenario } from '../../../shared/orcaDecisionEngine.js'
+import { evaluateOrcaDecision } from '../../../shared/orcaDecisionEngine.js'
+import { buildScenarioEvidence } from '../../../shared/orcaEvidence.js'
+import { aggregateEvidence } from '../../../shared/orcaEvidenceAggregator.js'
 
 function buildCanonicalScenario(rawScenario) {
   const normalized = normalizeMarineData(rawScenario)
+  const evidence = buildScenarioEvidence(normalized)
+  const aggregated = aggregateEvidence(evidence)
   return {
     ...normalized,
-    decision: evaluateScenario(normalized),
+    evidence: aggregated.evidence,
+    evidenceAggregation: aggregated.aggregation,
+    decision: evaluateOrcaDecision({ evidence: aggregated.evidence }),
   }
 }
 
