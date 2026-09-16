@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { MapContainer, TileLayer, WMSTileLayer, Circle, CircleMarker, Polyline, Polygon, Popup, Marker, useMap, useMapEvents } from 'react-leaflet'
 import { Layers, Play, Pause, RotateCcw, MessageSquare, Target, ShieldAlert, Anchor, Compass, Send, MapPin, Sparkles, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import 'leaflet/dist/leaflet.css'
 import { motion, AnimatePresence } from 'framer-motion'
 import L from 'leaflet'
 import { useScenario } from '../context/ScenarioContext'
+import { fetchIncoisPfz } from '../services/incoisService'
 
 const trawlerIcon = new L.Icon({
   iconUrl: 'https://cdn-icons-png.flaticon.com/512/2942/2942940.png',
@@ -29,6 +30,19 @@ const SCENARIO_CENTERS = {
   kochi: { center: [10.2, 75.9], zoom: 9 },
   chennai: { center: [13.15, 80.45], zoom: 9 },
   'bay-of-bengal': { center: [16.5, 85.5], zoom: 7 },
+}
+
+function geoJsonLinePositions(feature) {
+  const geometry = feature?.geometry
+  if (geometry?.type === 'LineString') {
+    return [geometry.coordinates.map(([longitude, latitude]) => [latitude, longitude])]
+  }
+  if (geometry?.type === 'MultiLineString') {
+    return geometry.coordinates.map((line) =>
+      line.map(([longitude, latitude]) => [latitude, longitude])
+    )
+  }
+  return []
 }
 
 function toRad(deg) {
@@ -152,6 +166,7 @@ export default function GISMap() {
   const [boatPosition, setBoatPosition] = useState(route[0])
   const [routeIndex, setRouteIndex] = useState(0)
   const [notifications, setNotifications] = useState([])
+  const [officialPfz, setOfficialPfz] = useState(null)
   const [clickedLocation, setClickedLocation] = useState(null)
   const [chatInput, setChatInput] = useState('')
   const [chatMessages, setChatMessages] = useState([
@@ -162,6 +177,37 @@ export default function GISMap() {
       time: 'Just now',
     },
   ])
+
+  useEffect(() => {
+    let active = true
+    fetchIncoisPfz()
+      .then((result) => {
+        if (active) setOfficialPfz(result)
+      })
+      .catch(() => {
+        if (active) {
+          setOfficialPfz({
+            status: 'unavailable',
+            isLive: false,
+            source: { provider: 'INCOIS' },
+            provenance: { provider: 'INCOIS' },
+            reason: 'source_unavailable',
+            data: null,
+          })
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const officialPfzLines = useMemo(() => {
+    if (officialPfz?.status !== 'available') return []
+    return officialPfz.data.features.flatMap((feature) =>
+      geoJsonLinePositions(feature)
+    )
+  }, [officialPfz])
 
   const chatEndRef = useRef(null)
   const timerRef = useRef(null)
@@ -369,7 +415,7 @@ export default function GISMap() {
         </div>
 
         <div className="mb-4 text-[9px] font-black uppercase tracking-widest text-amber-600 bg-amber-50 border border-amber-100 px-2 py-1 rounded-lg text-center">
-          SIMULATED EDIL DEMO DATA
+          DEMO LAYERS ARE SIMULATED
         </div>
 
         <div className="mb-4 text-[9px] leading-relaxed text-sky-700 bg-sky-50 border border-sky-100 px-2.5 py-2 rounded-lg">
@@ -385,9 +431,19 @@ export default function GISMap() {
         </a>
         </div>
 
+        <div className="mb-4 text-[9px] leading-relaxed text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-2 rounded-lg">
+          <div className="font-black uppercase tracking-widest">Official INCOIS PFZ</div>
+          <div className="mt-1">
+            {officialPfz?.status === 'available'
+              ? `Advisory geometry available${officialPfz.advisoryDate ? ` for ${officialPfz.advisoryDate}` : ''}.`
+              : 'PFZ advisory unavailable; no demo fallback is used.'}
+          </div>
+        </div>
+
         <div className="space-y-2">
         {[
           { id: 'PFZ', label: 'Simulated PFZ Fishing Zones', color: 'bg-emerald-500', icon: <Target size={14}/> },
+          { id: 'OFFICIAL_PFZ', label: 'Official INCOIS PFZ Geometry', color: 'bg-violet-500', icon: <Target size={14}/> },
           { id: 'INCOIS_SST', label: 'Official INCOIS WMS — SST', color: 'bg-cyan-500', icon: <Layers size={14}/> },
           { id: 'INCOIS_CHL', label: 'Official INCOIS WMS — Chlorophyll', color: 'bg-sky-500', icon: <Layers size={14}/> },
           { id: 'IMBL', label: 'IMBL Border Buffer', color: 'bg-rose-500', icon: <ShieldAlert size={14}/> },
@@ -669,6 +725,26 @@ export default function GISMap() {
             ))}
           </>
         )}
+
+        {activeLayers.includes('OFFICIAL_PFZ') && officialPfzLines.map((line, index) => (
+          <Polyline
+            key={`official-pfz-${index}`}
+            positions={line}
+            pathOptions={{ color: '#7c3aed', weight: 2.5, opacity: 0.85 }}
+          >
+            <Popup>
+              <div className="p-1 space-y-1">
+                <div className="font-bold text-violet-600 text-xs uppercase">Official INCOIS PFZ Geometry</div>
+                <div className="text-xs text-slate-600">
+                  Advisory date: {officialPfz.advisoryDate ?? 'not provided'}
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  Source: {officialPfz.source.name} (WFS)
+                </div>
+              </div>
+            </Popup>
+          </Polyline>
+        ))}
 
         {/* IMBL Border & Buffer */}
         {activeLayers.includes('IMBL') && (

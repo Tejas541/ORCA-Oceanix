@@ -26,6 +26,25 @@ export class IncoisOrcaRequestError extends Error {
     }
 }
 
+export async function fetchIncoisPfz() {
+    const response = await fetch(`${ORCA_BACKEND_BASE}/api/incois/pfz`)
+    if (!response.ok) {
+        throw new IncoisOrcaRequestError(
+            `ORCA backend returned HTTP ${response.status}`,
+            { status: response.status }
+        )
+    }
+
+    const result = await response.json()
+    if (!result || !result.status || !result.source || !result.provenance) {
+        throw new IncoisOrcaRequestError(
+            'ORCA backend returned an incomplete PFZ response'
+        )
+    }
+
+    return result
+}
+
 /**
  * Fetch the canonical INCOIS ORCA response through the backend.
  *
