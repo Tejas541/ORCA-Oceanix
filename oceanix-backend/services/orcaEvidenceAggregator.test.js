@@ -310,6 +310,30 @@ test('live evidence remains available and live', () => {
   assert.equal(result.evidence.every((record) => record.status === 'available'), true)
 })
 
+test('official forecast evidence remains forecast and non-live', () => {
+  const records = completeEvidence(
+      Object.fromEntries(
+          REQUIRED.map((parameter) => [
+            parameter,
+            {
+              status: 'available',
+              isLive: false,
+              provider: 'INCOIS',
+              quality: {
+                sourceDataStatus: 'forecast',
+              },
+            },
+          ])
+      )
+  )
+
+  const result = aggregateEvidence(records)
+
+  assert.equal(result.aggregation.sourceStatus, 'forecast')
+  assert.equal(result.aggregation.status, 'forecast')
+  assert.equal(result.aggregation.isLive, false)
+})
+
 test('mixed evidence is explicitly marked mixed', () => {
   const records = completeEvidence()
   records[0] = evidenceRecord({

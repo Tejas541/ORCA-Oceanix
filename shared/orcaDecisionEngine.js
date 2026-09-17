@@ -75,23 +75,43 @@ function cycloneRisk(value) {
 
 function dataStatus(records) {
   const available = records.filter((record) =>
-    (record.status === 'available' || record.status === 'simulated') &&
-    record.validation !== 'invalid' &&
-    record.validation !== 'missing' &&
-    validateEvidenceValue(record.parameter, record.value).valid
+      (record.status === 'available' || record.status === 'simulated') &&
+      record.validation !== 'invalid' &&
+      record.validation !== 'missing' &&
+      validateEvidenceValue(record.parameter, record.value).valid
   )
+
   const missing = records.filter((record) => !available.includes(record))
-  const liveCount = available.filter((record) => record.isLive).length
-  const simulatedCount = available.filter((record) => !record.isLive).length
-  const sourceStatus = liveCount > 0 && simulatedCount > 0
-    ? 'mixed'
-    : liveCount > 0
-      ? 'live'
-      : simulatedCount > 0
-        ? 'simulated'
-        : 'unavailable'
+
+  const liveCount = available.filter((record) => record.isLive === true).length
+
+  const simulatedCount = available.filter(
+      (record) => record.status === 'simulated'
+  ).length
+
+  const forecastCount = available.filter(
+      (record) =>
+          record.status === 'available' &&
+          record.isLive === false &&
+          record.quality?.sourceDataStatus === 'forecast'
+  ).length
+
+  let sourceStatus = 'unavailable'
+
+  if (liveCount > 0 && (simulatedCount > 0 || forecastCount > 0)) {
+    sourceStatus = 'mixed'
+  } else if (simulatedCount > 0 && forecastCount > 0) {
+    sourceStatus = 'mixed'
+  } else if (liveCount > 0) {
+    sourceStatus = 'live'
+  } else if (simulatedCount > 0) {
+    sourceStatus = 'simulated'
+  } else if (forecastCount > 0) {
+    sourceStatus = 'forecast'
+  }
 
   let status = 'unavailable'
+
   if (missing.length === 0) status = sourceStatus
   else if (available.length > 0) status = 'partial'
 

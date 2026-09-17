@@ -120,12 +120,34 @@ function conflictRecord(parameter) {
 
 function sourceStatus(records) {
   const usable = records.filter(isUsable)
-  const liveCount = usable.filter((record) => record.isLive).length
-  const simulatedCount = usable.length - liveCount
 
-  if (liveCount > 0 && simulatedCount > 0) return 'mixed'
+  const liveCount = usable.filter(
+      (record) => record.isLive === true
+  ).length
+
+  const simulatedCount = usable.filter(
+      (record) => record.status === 'simulated'
+  ).length
+
+  const forecastCount = usable.filter(
+      (record) =>
+          record.status === 'available' &&
+          record.isLive === false &&
+          record.quality?.sourceDataStatus === 'forecast'
+  ).length
+
+  if (liveCount > 0 && (simulatedCount > 0 || forecastCount > 0)) {
+    return 'mixed'
+  }
+
+  if (simulatedCount > 0 && forecastCount > 0) {
+    return 'mixed'
+  }
+
   if (liveCount > 0) return 'live'
   if (simulatedCount > 0) return 'simulated'
+  if (forecastCount > 0) return 'forecast'
+
   return 'unavailable'
 }
 
