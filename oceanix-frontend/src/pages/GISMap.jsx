@@ -60,6 +60,11 @@ function toDeg(rad) {
   return (rad * 180) / Math.PI
 }
 
+function formatOfficialForecastValue(value) {
+  const numericValue = Number(value)
+  return Number.isFinite(numericValue) ? numericValue.toFixed(4).replace(/\.?(0+)$/, '') : value
+}
+
 function haversineNm(a, b) {
   const dLat = toRad(b[0] - a[0])
   const dLon = toRad(b[1] - a[1])
@@ -595,7 +600,7 @@ export default function GISMap() {
             </div>
             <div className="mt-1">
                 {officialWave?.status === 'available' && officialWave.data
-                  ? `${officialWave.data.waveHeight} ${officialWave.data.unit} forecast for ${officialWave.data.forecastTime}.`
+                  ? `${formatOfficialForecastValue(officialWave.data.waveHeight)} ${officialWave.data.unit} forecast for ${officialWave.data.forecastTime}.`
                   : 'Wave forecast unavailable; no demo fallback is used.'}
             </div>
             <div className="mt-1 text-violet-600">
@@ -609,7 +614,7 @@ export default function GISMap() {
             </div>
             <div className="mt-1">
                 {officialWind?.status === 'available' && officialWind.data
-                  ? `${officialWind.data.windSpeed} ${officialWind.data.unit} forecast for ${officialWind.data.forecastTime}.`
+                  ? `${formatOfficialForecastValue(officialWind.data.windSpeed)} ${officialWind.data.unit} forecast for ${officialWind.data.forecastTime}.`
                   : 'Wind forecast unavailable; no demo fallback is used.'}
             </div>
             <div className="mt-1 text-indigo-600">
@@ -781,7 +786,7 @@ export default function GISMap() {
           <span className="text-[9px] font-bold text-slate-400 uppercase">Wave Height</span>
           <span className="text-xs font-black text-slate-800">
             {officialWave?.status === 'available' && officialWave.data
-              ? `${officialWave.data.waveHeight}${officialWave.data.unit}`
+              ? `${formatOfficialForecastValue(officialWave.data.waveHeight)}${officialWave.data.unit}`
               : 'Unavailable'}
           </span>
         </div>
@@ -790,7 +795,7 @@ export default function GISMap() {
           <span className="text-[9px] font-bold text-slate-400 uppercase">Wind</span>
           <span className="text-xs font-black text-slate-800">
             {officialWind?.status === 'available' && officialWind.data
-              ? `${officialWind.data.windSpeed}${officialWind.data.unit}`
+              ? `${formatOfficialForecastValue(officialWind.data.windSpeed)}${officialWind.data.unit}`
               : 'Unavailable'}
           </span>
         </div>
