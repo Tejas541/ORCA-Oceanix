@@ -17,6 +17,35 @@
 const ORCA_BACKEND_BASE = 'http://localhost:4000'
 
 const DEFAULT_TIME = '2023-05-21T12:00:00Z'
+export const FORECAST_COORDINATE_POLICY = 'direct_coordinate_request_no_snapping'
+
+export function createForecastRequestContext({ userCoordinates, selectedOperatingLocation } = {}) {
+    const selected = selectedOperatingLocation && {
+        latitude: selectedOperatingLocation.latitude,
+        longitude: selectedOperatingLocation.longitude,
+    }
+    const coordinates = selected ?? userCoordinates ?? null
+    return {
+        coordinates,
+        coordinateRole: selected ? 'selected_operating_location' : 'browser_gps',
+        coordinatePolicy: FORECAST_COORDINATE_POLICY,
+    }
+}
+
+function requestParameters({ latitude, longitude, time, requestContext } = {}) {
+    const coordinates = requestContext?.coordinates ?? { latitude, longitude }
+    return new URLSearchParams({
+        latitude: String(coordinates?.latitude),
+        longitude: String(coordinates?.longitude),
+        ...(time ? { time } : {}),
+        ...(requestContext?.coordinateRole
+            ? { coordinateRole: requestContext.coordinateRole }
+            : {}),
+        ...(requestContext?.coordinatePolicy
+            ? { coordinatePolicy: requestContext.coordinatePolicy }
+            : {}),
+    })
+}
 
 export class IncoisOrcaRequestError extends Error {
     constructor(message, { status = 502, cause } = {}) {
@@ -45,12 +74,8 @@ export async function fetchIncoisPfz() {
     return result
 }
 
-export async function fetchIncoisWave({ latitude, longitude, time } = {}) {
-    const params = new URLSearchParams({
-        latitude: String(latitude),
-        longitude: String(longitude),
-        ...(time ? { time } : {}),
-    })
+export async function fetchIncoisWave({ latitude, longitude, time, requestContext } = {}) {
+    const params = requestParameters({ latitude, longitude, time, requestContext })
     const response = await fetch(
         `${ORCA_BACKEND_BASE}/api/incois/wave?${params.toString()}`
     )
@@ -79,12 +104,8 @@ export async function fetchIncoisWave({ latitude, longitude, time } = {}) {
     return result
 }
 
-export async function fetchIncoisWind({ latitude, longitude, time } = {}) {
-    const params = new URLSearchParams({
-        latitude: String(latitude),
-        longitude: String(longitude),
-        ...(time ? { time } : {}),
-    })
+export async function fetchIncoisWind({ latitude, longitude, time, requestContext } = {}) {
+    const params = requestParameters({ latitude, longitude, time, requestContext })
     const response = await fetch(
         `${ORCA_BACKEND_BASE}/api/incois/wind?${params.toString()}`
     )
@@ -126,12 +147,9 @@ export async function fetchIncoisOrcaDecision({
                                                  latitude,
                                                  longitude,
                                                  time,
+                                                 requestContext,
                                              }) {
-    const params = new URLSearchParams({
-        latitude: String(latitude),
-        longitude: String(longitude),
-        ...(time ? { time } : {}),
-    })
+    const params = requestParameters({ latitude, longitude, time, requestContext })
     const url = `${ORCA_BACKEND_BASE}/api/orca/incois?${params.toString()}`
 
     let response

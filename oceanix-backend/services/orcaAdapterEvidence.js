@@ -4,6 +4,7 @@ import { createEvidenceRecord } from '../../shared/orcaEvidence.js'
 import { getMarineParameters } from './incoisService.js'
 
 const INCOIS_PROVIDER = 'INCOIS ERDDAP'
+const DEFAULT_COORDINATE_POLICY = 'direct_coordinate_request_no_snapping'
 
 function isFiniteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value)
@@ -165,6 +166,8 @@ export async function getIncoisOrcaDecision({
   marineParameters,
   legacyWindObservation = null,
   legacyWindSpeedKnots = null,
+  coordinateRole = 'browser_gps',
+  coordinatePolicy = DEFAULT_COORDINATE_POLICY,
 } = {}) {
   let sourceResult = marineParameters
 
@@ -205,6 +208,10 @@ export async function getIncoisOrcaDecision({
 
   return {
     source: sourceResult,
+    requestContext: {
+      coordinateRole,
+      coordinatePolicy,
+    },
     evidence: aggregated.evidence,
     aggregation: aggregated.aggregation,
     decision,

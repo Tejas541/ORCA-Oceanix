@@ -5,7 +5,13 @@ import 'leaflet/dist/leaflet.css'
 import { motion, AnimatePresence } from 'framer-motion'
 import L from 'leaflet'
 import { useScenario } from '../context/ScenarioContext'
-import { fetchIncoisPfz, fetchIncoisWave, fetchIncoisWind, fetchIncoisOrcaDecision } from '../services/incoisService'
+import {
+  createForecastRequestContext,
+  fetchIncoisPfz,
+  fetchIncoisWave,
+  fetchIncoisWind,
+  fetchIncoisOrcaDecision,
+} from '../services/incoisService'
 import { getBrowserLocationErrorMessage, requestBrowserLocation } from '../utils/browserGeolocation'
 import { MARINE_OPERATING_LOCATIONS } from '../data/marineOperatingLocations'
 import {
@@ -254,6 +260,10 @@ export default function GISMap() {
     userCoordinates,
     selectedOperatingLocation
   )
+  const forecastRequestContext = useMemo(
+    () => createForecastRequestContext({ userCoordinates, selectedOperatingLocation }),
+    [userCoordinates, selectedOperatingLocation]
+  )
 
   useEffect(() => {
     let active = true
@@ -282,9 +292,9 @@ export default function GISMap() {
   useEffect(() => {
     let active = true
     if (!userCoordinates) return undefined
-    const { latitude, longitude } = userCoordinates
+    const requestContext = forecastRequestContext
     setOfficialWave(null)
-    fetchIncoisWave({ latitude, longitude })
+    fetchIncoisWave({ requestContext })
       .then((result) => {
         if (active) setOfficialWave(result)
       })
@@ -303,14 +313,14 @@ export default function GISMap() {
     return () => {
       active = false
     }
-  }, [userCoordinates])
+  }, [userCoordinates, forecastRequestContext])
 
   useEffect(() => {
     let active = true
     if (!userCoordinates) return undefined
-    const { latitude, longitude } = userCoordinates
+    const requestContext = forecastRequestContext
     setOfficialWind(null)
-    fetchIncoisWind({ latitude, longitude })
+    fetchIncoisWind({ requestContext })
       .then((result) => {
         if (active) setOfficialWind(result)
       })
@@ -330,14 +340,14 @@ export default function GISMap() {
     return () => {
       active = false
     }
-  }, [userCoordinates])
+  }, [userCoordinates, forecastRequestContext])
 
   useEffect(() => {
     let active = true
     if (!userCoordinates) return undefined
 
-    const { latitude, longitude } = userCoordinates
-    fetchIncoisOrcaDecision({ latitude, longitude })
+    const requestContext = forecastRequestContext
+    fetchIncoisOrcaDecision({ requestContext })
       .then((result) => {
         if (active) setLocationDecision(result)
       })
@@ -348,7 +358,7 @@ export default function GISMap() {
     return () => {
       active = false
     }
-  }, [userCoordinates])
+  }, [userCoordinates, forecastRequestContext])
 
   const officialPfzLines = useMemo(() => {
     if (officialPfz?.status !== 'available') return []

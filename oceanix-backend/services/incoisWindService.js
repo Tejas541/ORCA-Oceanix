@@ -21,7 +21,10 @@ function unavailableResult({
   endpoint = null,
   location = null,
   error = null,
+  coordinateRole = 'browser_gps',
+  coordinatePolicy = 'direct_coordinate_request_no_snapping',
 } = {}) {
+  const requestContext = { coordinateRole, coordinatePolicy }
   const evidence = createEvidenceRecord({
     provider: 'INCOIS',
     source: source ?? INCOIS_WIND_SOURCE,
@@ -63,6 +66,7 @@ function unavailableResult({
       reason,
     },
     reason,
+    requestContext,
   }
 }
 
@@ -197,9 +201,12 @@ export async function fetchIncoisWind({
   timeEnd,
   fetchImpl = globalThis.fetch,
   retrievedAt = new Date().toISOString(),
+  coordinateRole = 'browser_gps',
+  coordinatePolicy = 'direct_coordinate_request_no_snapping',
 } = {}) {
   validateCoordinates(latitude, longitude)
   const location = [latitude, longitude]
+  const requestContext = { coordinateRole, coordinatePolicy }
 
   if (typeof fetchImpl !== 'function') {
     return unavailableResult({
@@ -207,6 +214,8 @@ export async function fetchIncoisWind({
       reason: 'source_unavailable',
       endpoint: INCOIS_OSF_PAGE_ENDPOINT,
       location,
+      coordinateRole,
+      coordinatePolicy,
     })
   }
 
@@ -218,6 +227,8 @@ export async function fetchIncoisWind({
         reason: 'source_unavailable',
         endpoint: INCOIS_OSF_PAGE_ENDPOINT,
         location,
+        coordinateRole,
+        coordinatePolicy,
         error: { status: page.status },
       })
     }
@@ -229,6 +240,8 @@ export async function fetchIncoisWind({
         reason: 'malformed_source_metadata',
         endpoint: INCOIS_OSF_PAGE_ENDPOINT,
         location,
+        coordinateRole,
+        coordinatePolicy,
       })
     }
 
@@ -248,6 +261,8 @@ export async function fetchIncoisWind({
         source: INCOIS_WIND_SOURCE,
         endpoint,
         location,
+        coordinateRole,
+        coordinatePolicy,
         error: { status: dataResponse.status },
       })
     }
@@ -260,6 +275,8 @@ export async function fetchIncoisWind({
         source: INCOIS_WIND_SOURCE,
         endpoint,
         location,
+        coordinateRole,
+        coordinatePolicy,
       })
     }
 
@@ -281,6 +298,8 @@ export async function fetchIncoisWind({
       isLive: false,
       validation: 'valid',
       quality: {
+        coordinateRole,
+        coordinatePolicy,
         sourceDataStatus: 'forecast',
         sourcePage: INCOIS_OSF_PAGE_ENDPOINT,
         forecastIssueDate: metadata.forecastIssueDate,
@@ -317,7 +336,10 @@ export async function fetchIncoisWind({
         sourceDataStatus: 'forecast',
         forecastIssueDate: metadata.forecastIssueDate,
         dataset: metadata.dataset,
+        coordinateRole,
+        coordinatePolicy,
       },
+      requestContext,
     }
   } catch (error) {
     return unavailableResult({

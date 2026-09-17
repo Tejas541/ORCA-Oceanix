@@ -28,6 +28,8 @@ export function createIncoisRouter({
       const result = await getWave({
         latitude,
         longitude,
+        ...(req.query.coordinateRole ? { coordinateRole: req.query.coordinateRole } : {}),
+        ...(req.query.coordinatePolicy ? { coordinatePolicy: req.query.coordinatePolicy } : {}),
         time: req.query.time,
         timeStart: req.query.timeStart,
         timeEnd: req.query.timeEnd,
@@ -52,6 +54,8 @@ export function createIncoisRouter({
       const result = await getWind({
         latitude,
         longitude,
+        ...(req.query.coordinateRole ? { coordinateRole: req.query.coordinateRole } : {}),
+        ...(req.query.coordinatePolicy ? { coordinatePolicy: req.query.coordinatePolicy } : {}),
         time: req.query.time,
         timeStart: req.query.timeStart,
         timeEnd: req.query.timeEnd,

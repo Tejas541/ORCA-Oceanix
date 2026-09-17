@@ -17,7 +17,13 @@ export function createOrcaRouter({
     const time = req.query.time
 
     try {
-      const result = await getDecision({ latitude, longitude, time })
+      const result = await getDecision({
+        latitude,
+        longitude,
+        time,
+        ...(req.query.coordinateRole ? { coordinateRole: req.query.coordinateRole } : {}),
+        ...(req.query.coordinatePolicy ? { coordinatePolicy: req.query.coordinatePolicy } : {}),
+      })
       return res.json(result)
     } catch (error) {
       return res.status(error.status ?? 502).json({
