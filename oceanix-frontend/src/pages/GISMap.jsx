@@ -8,8 +8,6 @@ import { useScenario } from '../context/ScenarioContext'
 import {
   createForecastRequestContext,
   fetchIncoisPfz,
-  fetchIncoisWave,
-  fetchIncoisWind,
   fetchIncoisOrcaDecision,
 } from '../services/incoisService'
 import { getBrowserLocationErrorMessage, requestBrowserLocation } from '../utils/browserGeolocation'
@@ -37,8 +35,6 @@ const EARTH_RADIUS_NM = 3440.065
 const NM_TO_METERS = 1852
 const STEP_MS = 800
 const INCOIS_PFZ_WMS_URL = 'https://incois.gov.in/geoserver/PFZ-TUNA-SST-CHL/wms'
-const INCOIS_PFZ_WMS_CAPABILITIES_URL =
-  `${INCOIS_PFZ_WMS_URL}?SERVICE=WMS&VERSION=1.1.0&REQUEST=GetCapabilities`
 
 function geoJsonLinePositions(feature) {
   const geometry = feature?.geometry
@@ -63,7 +59,7 @@ function toDeg(rad) {
 
 function formatOfficialForecastValue(value) {
   const numericValue = Number(value)
-  return Number.isFinite(numericValue) ? numericValue.toFixed(4).replace(/\.?(0+)$/, '') : value
+  return Number.isFinite(numericValue) ? numericValue.toFixed(3).replace(/\.?(0+)$/, '') : value
 }
 
 function haversineNm(a, b) {
@@ -210,8 +206,6 @@ export default function GISMap() {
   const [routeIndex, setRouteIndex] = useState(0)
   const [notifications, setNotifications] = useState([])
   const [officialPfz, setOfficialPfz] = useState(null)
-  const [officialWave, setOfficialWave] = useState(null)
-  const [officialWind, setOfficialWind] = useState(null)
   const [locationStatus, setLocationStatus] = useState('loading')
   const [locationError, setLocationError] = useState('')
   const [userCoordinates, setUserCoordinates] = useState(null)
@@ -297,59 +291,6 @@ export default function GISMap() {
   useEffect(() => {
     let active = true
     if (!userCoordinates) return undefined
-    const requestContext = forecastRequestContext
-    setOfficialWave(null)
-    fetchIncoisWave({ requestContext })
-      .then((result) => {
-        if (active) setOfficialWave(result)
-      })
-      .catch(() => {
-        if (active) {
-          setOfficialWave({
-            status: 'unavailable',
-            source: { provider: 'INCOIS' },
-            provenance: { sourceDataStatus: 'unavailable' },
-            data: null,
-            reason: 'source_unavailable',
-          })
-        }
-      })
-
-    return () => {
-      active = false
-    }
-  }, [userCoordinates, forecastRequestContext])
-
-  useEffect(() => {
-    let active = true
-    if (!userCoordinates) return undefined
-    const requestContext = forecastRequestContext
-    setOfficialWind(null)
-    fetchIncoisWind({ requestContext })
-      .then((result) => {
-        if (active) setOfficialWind(result)
-      })
-      .catch(() => {
-        if (active) {
-          setOfficialWind({
-            status: 'unavailable',
-            isLive: false,
-            source: { provider: 'INCOIS' },
-            provenance: { sourceDataStatus: 'unavailable' },
-            data: null,
-            reason: 'source_unavailable',
-          })
-        }
-      })
-
-    return () => {
-      active = false
-    }
-  }, [userCoordinates, forecastRequestContext])
-
-  useEffect(() => {
-    let active = true
-    if (!userCoordinates) return undefined
 
     const requestContext = forecastRequestContext
     fetchIncoisOrcaDecision({ requestContext })
@@ -368,6 +309,18 @@ export default function GISMap() {
   const officialVisibilityEvidence = useMemo(
     () => locationDecision?.evidence?.find(
       (record) => record.parameter === 'visibility' && record.status === 'available'
+    ) ?? null,
+    [locationDecision]
+  )
+  const canonicalWaveEvidence = useMemo(
+    () => locationDecision?.evidence?.find(
+      (record) => record.parameter === 'waveHeight' && record.status === 'available'
+    ) ?? null,
+    [locationDecision]
+  )
+  const canonicalWindEvidence = useMemo(
+    () => locationDecision?.evidence?.find(
+      (record) => record.parameter === 'windSpeed' && record.status === 'available'
     ) ?? null,
     [locationDecision]
   )
@@ -577,30 +530,8 @@ export default function GISMap() {
         </div>
 
         {isLayersOpen ? <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-          <div className="mb-4 text-[9px] font-black uppercase tracking-widest text-amber-600 bg-amber-50 border border-amber-100 px-2 py-1 rounded-lg text-center">
-            DEMO LAYERS ARE SIMULATED
-          </div>
-
-          <div className="mb-4 text-[9px] leading-relaxed text-sky-700 bg-sky-50 border border-sky-100 px-2.5 py-2 rounded-lg">
-            <div className="font-black uppercase tracking-widest">Official INCOIS WMS</div>
-            <div className="mt-1">Raster context only: SST and chlorophyll layers. It does not provide point SST, wave, or current values.</div>
-            <a
-                href={INCOIS_PFZ_WMS_CAPABILITIES_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-1 block font-bold underline"
-            >
-                View GetCapabilities provenance
-            </a>
-          </div>
-
-          <div className="mb-4 text-[9px] leading-relaxed text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-2 rounded-lg">
-            <div className="font-black uppercase tracking-widest">Official INCOIS PFZ</div>
-            <div className="mt-1">
-                {officialPfz?.status === 'available'
-                  ? `Advisory geometry available${officialPfz.advisoryDate ? ` for ${officialPfz.advisoryDate}` : ''}.`
-                  : 'PFZ advisory unavailable; no demo fallback is used.'}
-            </div>
+          <div className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
+            Data Sources
           </div>
 
           <div className="mb-4 text-[9px] leading-relaxed text-violet-700 bg-violet-50 border border-violet-100 px-2.5 py-2 rounded-lg">
@@ -608,12 +539,12 @@ export default function GISMap() {
                 Official INCOIS Significant Wave Height
             </div>
             <div className="mt-1">
-                {officialWave?.status === 'available' && officialWave.data
-                  ? `${formatOfficialForecastValue(officialWave.data.waveHeight)} ${officialWave.data.unit} forecast for ${officialWave.data.forecastTime}.`
-                  : 'Wave forecast unavailable; no demo fallback is used.'}
+                {canonicalWaveEvidence
+                  ? `${formatOfficialForecastValue(canonicalWaveEvidence.value)} ${canonicalWaveEvidence.unit ?? 'm'} forecast for ${canonicalWaveEvidence.forecastTime ?? 'time unavailable'}.`
+                  : 'Unavailable for selected location'}
             </div>
             <div className="mt-1 text-violet-600">
-                Forecast source data is separate from simulated demo layers.
+                Source: {canonicalWaveEvidence?.provider ?? 'INCOIS'}
             </div>
           </div>
 
@@ -622,12 +553,12 @@ export default function GISMap() {
                 Official INCOIS Wind Forecast
             </div>
             <div className="mt-1">
-                {officialWind?.status === 'available' && officialWind.data
-                  ? `${formatOfficialForecastValue(officialWind.data.windSpeed)} ${officialWind.data.unit} forecast for ${officialWind.data.forecastTime}.`
-                  : 'Wind forecast unavailable; no demo fallback is used.'}
+                {canonicalWindEvidence
+                  ? `${formatOfficialForecastValue(canonicalWindEvidence.value)} ${canonicalWindEvidence.unit ?? 'm/s'} forecast for ${canonicalWindEvidence.forecastTime ?? 'time unavailable'}.`
+                  : 'Unavailable for selected location'}
             </div>
             <div className="mt-1 text-indigo-600">
-                Forecast • not live observation
+                Source: {canonicalWindEvidence?.provider ?? 'INCOIS'}
             </div>
           </div>
 
@@ -638,7 +569,7 @@ export default function GISMap() {
             <div className="mt-1">
                 {officialVisibilityEvidence
                   ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)} ${officialVisibilityEvidence.unit ?? 'm'} forecast for ${officialVisibilityEvidence.forecastTime ?? 'time unavailable'}.`
-                  : 'Visibility forecast unavailable; no demo fallback is used.'}
+                  : 'Unavailable for selected location'}
             </div>
             <div className="mt-1 text-cyan-600">
                 Forecast • not live observation · Source: {officialVisibilityEvidence?.provider ?? 'Open-Meteo'}
@@ -659,6 +590,15 @@ export default function GISMap() {
               {gdacsCycloneDisplay.provider ? `Source: ${gdacsCycloneDisplay.provider}` : 'Source: GDACS'}
               {gdacsCycloneDisplay.status ? ` · ${gdacsCycloneDisplay.status} • Runtime` : ''}
             </div>
+          </div>
+
+          <div className="mb-4 text-[9px] leading-relaxed text-slate-600 bg-slate-50 border border-slate-100 px-2.5 py-2 rounded-lg">
+            <div className="font-black uppercase tracking-widest">Lightning Risk Percentage</div>
+            <div className="mt-1">Unavailable for selected location</div>
+          </div>
+
+          <div className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
+            Map Layers
           </div>
 
           <div className="space-y-2">
@@ -766,8 +706,8 @@ export default function GISMap() {
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-slate-400 uppercase">Wave Height</span>
           <span className="text-xs font-black text-slate-800">
-            {officialWave?.status === 'available' && officialWave.data
-              ? `${formatOfficialForecastValue(officialWave.data.waveHeight)}${officialWave.data.unit}`
+            {canonicalWaveEvidence
+              ? `${formatOfficialForecastValue(canonicalWaveEvidence.value)} ${canonicalWaveEvidence.unit ?? 'm'}`
               : 'Unavailable'}
           </span>
         </div>
@@ -775,8 +715,8 @@ export default function GISMap() {
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-slate-400 uppercase">Wind</span>
           <span className="text-xs font-black text-slate-800">
-            {officialWind?.status === 'available' && officialWind.data
-              ? `${formatOfficialForecastValue(officialWind.data.windSpeed)}${officialWind.data.unit}`
+            {canonicalWindEvidence
+              ? `${formatOfficialForecastValue(canonicalWindEvidence.value)} ${canonicalWindEvidence.unit ?? 'm/s'}`
               : 'Unavailable'}
           </span>
         </div>
@@ -785,7 +725,7 @@ export default function GISMap() {
           <span className="text-[9px] font-bold text-slate-400 uppercase">Visibility</span>
           <span className="text-xs font-black text-slate-800">
             {officialVisibilityEvidence
-              ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)}${officialVisibilityEvidence.unit ?? 'm'}`
+              ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)} ${officialVisibilityEvidence.unit ?? 'm'}`
               : 'Unavailable'}
           </span>
         </div>

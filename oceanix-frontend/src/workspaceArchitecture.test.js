@@ -82,3 +82,33 @@ test('advisory bulletin does not render legacy PFZ or IMBL fixture rows', () => 
   assert.match(source, /Unavailable for selected location/)
   assert.match(source, /No location-specific IMBL geometry/)
 })
+
+test('GIS keeps official layers separate from canonical data sources', () => {
+  const source = read('./pages/GISMap.jsx')
+  assert.match(source, /Data Sources/)
+  assert.match(source, /Map Layers/)
+  for (const layer of ['OFFICIAL_PFZ', 'INCOIS_SST', 'INCOIS_CHL']) {
+    assert.match(source, new RegExp(`id: '${layer}'`))
+  }
+  assert.match(source, /canonicalWaveEvidence/)
+  assert.match(source, /canonicalWindEvidence/)
+  assert.match(source, /Lightning Risk Percentage/)
+})
+
+test('GIS evidence presentation uses canonical units and readable precision', () => {
+  const source = read('./pages/GISMap.jsx')
+  assert.match(source, /toFixed\(3\)/)
+  assert.match(source, /canonicalWaveEvidence\.unit \?\? 'm'/)
+  assert.match(source, /canonicalWindEvidence\.unit \?\? 'm\/s'/)
+  assert.match(source, /officialVisibilityEvidence\.unit \?\? 'm'/)
+  assert.doesNotMatch(source, /Visibility[\s\S]{0,300}NM/)
+})
+
+test('bulletin uses runtime evidence wording and has no literal template markers or stale date', () => {
+  const source = read('./pages/AdvisoryBulletin.jsx')
+  assert.match(source, /ORCA MARINE ADVISORY/)
+  assert.match(source, /RUNTIME EVIDENCE SNAPSHOT/)
+  assert.match(source, /Operating location: \{operatingLocationName\}\./)
+  assert.doesNotMatch(source, /`Operating location: \$\{operatingLocationName\}/)
+  assert.doesNotMatch(source, /2026-08-31/)
+})
