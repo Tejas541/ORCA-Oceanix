@@ -4,6 +4,10 @@ import { createEvidenceRecord } from '../../shared/orcaEvidence.js'
 import { getMarineParameters } from './incoisService.js'
 import { fetchIncoisWave } from './incoisWaveService.js'
 import { fetchIncoisWind } from './incoisWindService.js'
+import {
+    fetchOpenMeteoForecast,
+    OPEN_METEO_LIGHTNING_PARAMETER,
+} from './openMeteoService.js'
 
 const INCOIS_PROVIDER = 'INCOIS ERDDAP'
 const DEFAULT_COORDINATE_POLICY = 'direct_coordinate_request_no_snapping'
@@ -84,6 +88,44 @@ function unavailableOsfEvidence({
       message: error?.message ?? 'INCOIS OSF request failed',
     },
   })
+}
+
+function unavailableOpenMeteoEvidence({
+                                          parameter,
+                                          latitude,
+                                          longitude,
+                                          coordinateRole,
+                                          coordinatePolicy,
+                                          error,
+                                      }) {
+    return createEvidenceRecord({
+        provider: 'Open-Meteo',
+        source: 'Open-Meteo forecast',
+        endpoint: 'https://api.open-meteo.com/v1/forecast',
+        parameter,
+        value: null,
+        unit: parameter === 'visibility' ? 'm' : 'J/kg',
+        location: [latitude, longitude],
+        status: 'unavailable',
+        isLive: false,
+        validation: 'missing',
+        quality: {
+            coordinateRole,
+            coordinatePolicy,
+            sourceDataStatus: 'unavailable',
+            sourceError: {
+                code: error?.code ?? 'OPEN_METEO_REQUEST_FAILED',
+                message: error?.message ?? 'Open-Meteo request failed',
+            },
+            ...(parameter === OPEN_METEO_LIGHTNING_PARAMETER
+                ? {
+                    canonicalParameter: 'lightningRiskPercent',
+                    canonicalMapping:
+                        'not_available_without_defensible_percentage_conversion',
+                }
+                : {}),
+        },
+    })
 }
 
 export function mapIncoisMarineParametersToEvidence(result = {}) {
@@ -187,34 +229,47 @@ export function buildIncoisEvidence({
 }
 
 export async function getIncoisOrcaDecision({
-                                              latitude,
-                                              longitude,
-                                              time,
-                                              fetchImpl = globalThis.fetch,
-                                              timeoutMs,
-                                              // Legacy ERDDAP inputs are intentionally ignored on the canonical OSF path.
-                                              marineParameters: _legacyMarineParameters,
-                                              legacyWindObservation = null,
-                                              legacyWindSpeedKnots = null,
-                                              coordinateRole = 'browser_gps',
-                                              coordinatePolicy = DEFAULT_COORDINATE_POLICY,
-                                              getWave = fetchIncoisWave,
-                                              getWind = fetchIncoisWind,
+                                                latitude,
+                                                longitude,
+                                                time,
+                                                fetchImpl = globalThis.fetch,
+                                                timeoutMs,
+                                                // Legacy ERDDAP inputs are intentionally ignored on the canonical OSF path.
+                                                marineParameters: _legacyMarineParameters,
+                                                legacyWindObservation = null,
+                                                legacyWindSpeedKnots = null,
+                                                coordinateRole = 'browser_gps',
+                                                coordinatePolicy = DEFAULT_COORDINATE_POLICY,
+                                                getWave = fetchIncoisWave,
+                                                getWind = fetchIncoisWind,
+                                                getWeather = fetchOpenMeteoForecast,
                                             } = {}) {
-  const request = {
-    latitude,
-    longitude,
-    time,
-    fetchImpl,
-    coordinateRole,
-    coordinatePolicy,
-  }
-  const [waveResponse, windResponse] = await Promise.allSettled([
-    getWave(request),
-    getWind(request),
-  ])
-  const waveResult = waveResponse.status === 'fulfilled' ? waveResponse.value : null
-  const windResult = windResponse.status === 'fulfilled' ? windResponse.value : null
+    const request = {
+        latitude,
+        longitude,
+        time,
+        fetchImpl,
+        coordinateRole,
+        coordinatePolicy,
+    }
+
+    const [waveResponse, windResponse, weatherResponse] =
+        await Promise.allSettled([
+            getWave(request),
+            getWind(request),
+            getWeather(request),
+        ])
+
+    const waveResult =
+        waveResponse.status === 'fulfilled' ? waveResponse.value : null
+
+    const windResult =
+        windResponse.status === 'fulfilled' ? windResponse.value : null
+
+    const weatherResult =
+        weatherResponse.status === 'fulfilled'
+            ? weatherResponse.value
+            : null
   const evidence = [
     ...(waveResult?.evidence ?? [unavailableOsfEvidence({
       parameter: 'waveHeight',
@@ -232,6 +287,24 @@ export async function getIncoisOrcaDecision({
       coordinatePolicy,
       error: windResponse.reason,
     })]),
+      ...(weatherResult?.evidence ?? [
+          unavailableOpenMeteoEvidence({
+              parameter: 'visibility',
+              latitude,
+              longitude,
+              coordinateRole,
+              coordinatePolicy,
+              error: weatherResponse.reason,
+          }),
+          unavailableOpenMeteoEvidence({
+              parameter: OPEN_METEO_LIGHTNING_PARAMETER,
+              latitude,
+              longitude,
+              coordinateRole,
+              coordinatePolicy,
+              error: weatherResponse.reason,
+          }),
+      ]),
   ]
   const aggregated = aggregateEvidence(evidence)
 
@@ -240,6 +313,7 @@ export async function getIncoisOrcaDecision({
       provider: 'INCOIS',
       wave: waveResult?.source ?? null,
       wind: windResult?.source ?? null,
+        weather: weatherResult?.source ?? null,
     },
     requestContext: {
       coordinateRole,
@@ -251,6 +325,7 @@ export async function getIncoisOrcaDecision({
       coordinatePolicy,
       wave: waveResult?.provenance ?? null,
       wind: windResult?.provenance ?? null,
+        weather: weatherResult?.provenance ?? null,
     },
     evidence: aggregated.evidence,
     aggregation: aggregated.aggregation,

@@ -365,6 +365,13 @@ export default function GISMap() {
     }
   }, [userCoordinates, forecastRequestContext])
 
+  const officialVisibilityEvidence = useMemo(
+      () => locationDecision?.evidence?.find(
+          (record) => record.parameter === 'visibility' && record.status === 'available'
+      ) ?? null,
+      [locationDecision]
+  )
+
   const officialPfzLines = useMemo(() => {
     if (officialPfz?.status !== 'available') return []
     return officialPfz.data.features.flatMap((feature) =>
@@ -622,6 +629,20 @@ export default function GISMap() {
             </div>
           </div>
 
+          <div className="mb-4 text-[9px] leading-relaxed text-cyan-700 bg-cyan-50 border border-cyan-100 px-2.5 py-2 rounded-lg">
+            <div className="font-black uppercase tracking-widest">
+              Official Open-Meteo Visibility
+            </div>
+            <div className="mt-1">
+              {officialVisibilityEvidence
+                  ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)} ${officialVisibilityEvidence.unit ?? 'm'} forecast for ${officialVisibilityEvidence.forecastTime ?? 'time unavailable'}.`
+                  : 'Visibility forecast unavailable; no demo fallback is used.'}
+            </div>
+            <div className="mt-1 text-cyan-600">
+              Forecast • not live observation · Source: {officialVisibilityEvidence?.provider ?? 'Open-Meteo'}
+            </div>
+          </div>
+
           <div className="space-y-2">
             {[
                 { id: 'PFZ', label: 'Simulated PFZ Fishing Zones', color: 'bg-emerald-500', icon: <Target size={14}/> },
@@ -800,6 +821,18 @@ export default function GISMap() {
           </span>
         </div>
         <div className="w-px h-6 bg-slate-200 shrink-0" />
+
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-slate-400 uppercase">Visibility</span>
+          <span className="text-xs font-black text-slate-800">
+    {officialVisibilityEvidence
+        ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)}${officialVisibilityEvidence.unit ?? 'm'}`
+        : 'Unavailable'}
+  </span>
+        </div>
+
+        <div className="w-px h-6 bg-slate-200 shrink-0" />
+
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-slate-400 uppercase">Safety Index</span>
           <span className="text-xs font-black text-slate-800">

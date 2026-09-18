@@ -186,7 +186,7 @@ test('incomplete adapter evidence fails closed without mock substitution', async
   assert.equal(result.decision.riskLevel, 'DATA_INSUFFICIENT')
   assert.equal(result.decision.safetyScore, null)
   assert.equal(result.aggregation.complete, false)
-  assert.equal(result.evidence.length, 5)
+  assert.equal(result.evidence.length, 6)
 })
 
 test('buildIncoisEvidence combines only supported INCOIS parameters', () => {
