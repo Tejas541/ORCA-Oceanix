@@ -15,8 +15,15 @@ export function createIncoisRouter({
 } = {}) {
   const router = express.Router()
 
-  router.get('/pfz', async (_req, res) => {
-    const result = await getPfz()
+  router.get('/pfz', async (req, res) => {
+    const latitude = parseCoordinate(req.query.lat ?? req.query.latitude)
+    const longitude = parseCoordinate(req.query.lon ?? req.query.longitude)
+    const result = await getPfz({
+      latitude,
+      longitude,
+      ...(req.query.coordinateRole ? { coordinateRole: req.query.coordinateRole } : {}),
+      ...(req.query.coordinatePolicy ? { coordinatePolicy: req.query.coordinatePolicy } : {}),
+    })
     return res.json(result)
   })
 
