@@ -59,7 +59,7 @@ function toDeg(rad) {
 
 function formatOfficialForecastValue(value) {
   const numericValue = Number(value)
-  return Number.isFinite(numericValue) ? numericValue.toFixed(3).replace(/\.?(0+)$/, '') : value
+  return Number.isFinite(numericValue) ? numericValue.toFixed(4) : value
 }
 
 function haversineNm(a, b) {
@@ -196,9 +196,13 @@ export default function GISMap() {
   const bufferRing = imblBufferPolygon(imblLine, bufferNm)
 
   const [activeLayers, setActiveLayers] = useState([
+    'PFZ',
     'OFFICIAL_PFZ',
     'INCOIS_SST',
     'INCOIS_CHL',
+    'IMBL',
+    'MPA',
+    'CYCLONE',
   ])
   const [isSimulating, setIsSimulating] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
@@ -211,6 +215,7 @@ export default function GISMap() {
   const [userCoordinates, setUserCoordinates] = useState(null)
   const [isOperatingLocationOpen, setIsOperatingLocationOpen] = useState(false)
   const [isAssistantOpen, setIsAssistantOpen] = useState(false)
+  const [isSourcesOpen, setIsSourcesOpen] = useState(true)
   const [isLayersOpen, setIsLayersOpen] = useState(true)
   const [clickedLocation, setClickedLocation] = useState(null)
   const [chatInput, setChatInput] = useState('')
@@ -375,7 +380,9 @@ export default function GISMap() {
     }
   }, [chatMessages])
 
-  const liveImblNm = null
+  const liveImblNm = isSimulating
+    ? distanceToPolylineNm(boatPosition, imblLine)
+    : scenario.imbl.distanceFromHarbourNm
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -506,37 +513,30 @@ export default function GISMap() {
   return (
     <div className="h-screen w-full relative bg-slate-50 overflow-hidden font-sans">
       
-      {/* 1. Left Sidebar: Map Layers & Controls */}
+      {/* 1. Data Sources pane */}
       <div className={`absolute top-20 bottom-24 left-6 z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
-        isLayersOpen ? 'w-72 p-5' : 'w-12 p-2'
+        isSourcesOpen ? 'w-72 p-5' : 'w-12 p-2'
       }`}>
         <div className="flex items-center justify-between mb-4">
-          {isLayersOpen && (
-            <>
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                <Layers size={14} /> Map Layers
-              </h3>
-              <span className="text-[9px] font-mono text-blue-500 font-bold bg-blue-50 px-2 py-0.5 rounded">DEMO L3</span>
-            </>
+          {isSourcesOpen && (
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+              <Layers size={14} /> Data Sources
+            </h3>
           )}
           <button
-            onClick={() => setIsLayersOpen((open) => !open)}
+            onClick={() => setIsSourcesOpen((open) => !open)}
             className="ml-auto p-1 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-            aria-label={isLayersOpen ? 'Collapse map layers' : 'Expand map layers'}
-            title={isLayersOpen ? 'Collapse map layers' : 'Expand map layers'}
+            aria-label={isSourcesOpen ? 'Collapse data sources' : 'Expand data sources'}
+            title={isSourcesOpen ? 'Collapse data sources' : 'Expand data sources'}
           >
-            {isLayersOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+            {isSourcesOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
           </button>
         </div>
 
-        {isLayersOpen ? <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-          <div className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
-            Data Sources
-          </div>
-
+        {isSourcesOpen ? <div className="flex-1 min-h-0 overflow-y-auto pr-1">
           <div className="mb-4 text-[9px] leading-relaxed text-violet-700 bg-violet-50 border border-violet-100 px-2.5 py-2 rounded-lg">
             <div className="font-black uppercase tracking-widest">
-                Official INCOIS Significant Wave Height
+                INCOIS Wave Forecast
             </div>
             <div className="mt-1">
                 {canonicalWaveEvidence
@@ -550,7 +550,7 @@ export default function GISMap() {
 
           <div className="mb-4 text-[9px] leading-relaxed text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-2 rounded-lg">
             <div className="font-black uppercase tracking-widest">
-                Official INCOIS Wind Forecast
+                INCOIS Wind Forecast
             </div>
             <div className="mt-1">
                 {canonicalWindEvidence
@@ -564,7 +564,7 @@ export default function GISMap() {
 
           <div className="mb-4 text-[9px] leading-relaxed text-cyan-700 bg-cyan-50 border border-cyan-100 px-2.5 py-2 rounded-lg">
             <div className="font-black uppercase tracking-widest">
-                Official Open-Meteo Visibility
+                Open-Meteo Visibility
             </div>
             <div className="mt-1">
                 {officialVisibilityEvidence
@@ -596,16 +596,39 @@ export default function GISMap() {
             <div className="font-black uppercase tracking-widest">Lightning Risk Percentage</div>
             <div className="mt-1">Unavailable for selected location</div>
           </div>
+        </div> : null}
+      </div>
 
-          <div className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
-            Map Layers
-          </div>
+      {/* 2. Map Layers pane */}
+      <div className={`absolute top-20 bottom-24 left-[21rem] z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
+        isLayersOpen ? 'w-72 p-5' : 'w-12 p-2'
+      }`}>
+        <div className="flex items-center justify-between mb-4">
+          {isLayersOpen && (
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+              <Layers size={14} /> Map Layers
+            </h3>
+          )}
+          <button
+            onClick={() => setIsLayersOpen((open) => !open)}
+            className="ml-auto p-1 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+            aria-label={isLayersOpen ? 'Collapse map layers' : 'Expand map layers'}
+            title={isLayersOpen ? 'Collapse map layers' : 'Expand map layers'}
+          >
+            {isLayersOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+          </button>
+        </div>
 
+        {isLayersOpen ? <div className="flex-1 min-h-0 overflow-y-auto pr-1">
           <div className="space-y-2">
             {[
+                { id: 'PFZ', label: 'Simulated PFZ Fishing Zones', color: 'bg-emerald-500', icon: <Target size={14}/> },
                 { id: 'OFFICIAL_PFZ', label: 'Official INCOIS PFZ Geometry', color: 'bg-violet-500', icon: <Target size={14}/> },
                 { id: 'INCOIS_SST', label: 'Official INCOIS WMS — SST', color: 'bg-cyan-500', icon: <Layers size={14}/> },
                 { id: 'INCOIS_CHL', label: 'Official INCOIS WMS — Chlorophyll', color: 'bg-sky-500', icon: <Layers size={14}/> },
+                { id: 'IMBL', label: 'Simulated IMBL Border Buffer', color: 'bg-rose-500', icon: <ShieldAlert size={14}/> },
+                { id: 'MPA', label: 'Simulated MPA Eco Reserves', color: 'bg-orange-400', icon: <Anchor size={14}/> },
+                { id: 'CYCLONE', label: 'Simulated Cyclone Track', color: 'bg-blue-600', icon: <Layers size={14}/> },
             ].map((layer) => (
                 <button
                   key={layer.id}
@@ -621,6 +644,32 @@ export default function GISMap() {
             ))}
           </div>
 
+          <div className="mt-6 pt-4 border-t border-slate-200/60">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
+              <span>Simulated Trawler Route</span>
+              <span className="text-slate-500 font-mono">{scenario.trawlerRoute.vesselId}</span>
+            </div>
+            {!isSimulating ? (
+              <button onClick={triggerSimulation} className="w-full bg-slate-900 text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-md active:scale-98">
+                <Play size={13} fill="white" /> Start Trawler Route
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                {isAnimating ? (
+                  <button onClick={pauseSimulation} className="flex-1 bg-amber-500 text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-amber-600 transition-all">
+                    <Pause size={13} /> Pause
+                  </button>
+                ) : (
+                  <button onClick={() => setIsAnimating(true)} className="flex-1 bg-emerald-600 text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-emerald-700 transition-all">
+                    <Play size={13} fill="white" /> Resume
+                  </button>
+                )}
+                <button onClick={resetSimulation} className="bg-slate-200 text-slate-700 p-2 rounded-xl hover:bg-slate-300 transition-all" title="Reset Route">
+                  <RotateCcw size={14} />
+                </button>
+              </div>
+            )}
+          </div>
         </div> : null}
       </div>
 

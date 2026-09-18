@@ -540,7 +540,7 @@ export default function AgenticChat({ view = 'chat' }) {
                     </div>
                     <div className="flex flex-col">
                       <span className="text-[9px] font-bold text-slate-400 uppercase">Wave Height</span>
-                      <span className="text-xs font-black text-slate-800">{locationDecision?.evidence?.find((record) => record.parameter === 'waveHeight' && record.status === 'available')?.value ?? '—'}{locationDecision?.evidence?.find((record) => record.parameter === 'waveHeight' && record.status === 'available')?.unit ?? ''}</span>
+                      <span className="text-xs font-black text-slate-800">{(() => { const record = locationDecision?.evidence?.find((item) => item.parameter === 'waveHeight' && item.status === 'available'); return record ? `${Number(record.value).toFixed(4)} ${record.unit ?? 'm'}` : '—' })()}</span>
                     </div>
                   </div>
 

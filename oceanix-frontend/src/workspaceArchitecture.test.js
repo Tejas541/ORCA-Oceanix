@@ -83,25 +83,37 @@ test('advisory bulletin does not render legacy PFZ or IMBL fixture rows', () => 
   assert.match(source, /No location-specific IMBL geometry/)
 })
 
-test('GIS keeps official layers separate from canonical data sources', () => {
+test('GIS keeps independent Data Sources and Map Layers panes', () => {
   const source = read('./pages/GISMap.jsx')
-  assert.match(source, /Data Sources/)
-  assert.match(source, /Map Layers/)
+  assert.match(source, /Data Sources pane/)
+  assert.match(source, /Map Layers pane/)
+  assert.match(source, /isSourcesOpen/)
+  assert.match(source, /isLayersOpen/)
+  assert.match(source, /overflow-y-auto/)
   for (const layer of ['OFFICIAL_PFZ', 'INCOIS_SST', 'INCOIS_CHL']) {
     assert.match(source, new RegExp(`id: '${layer}'`))
   }
+  for (const layer of ['PFZ', 'IMBL', 'MPA', 'CYCLONE']) {
+    assert.match(source, new RegExp(`id: '${layer}'`))
+  }
+  assert.match(source, /Start Trawler Route/)
   assert.match(source, /canonicalWaveEvidence/)
   assert.match(source, /canonicalWindEvidence/)
   assert.match(source, /Lightning Risk Percentage/)
 })
 
-test('GIS evidence presentation uses canonical units and readable precision', () => {
+test('GIS and Safety evidence presentation uses canonical units and four-decimal precision', () => {
   const source = read('./pages/GISMap.jsx')
-  assert.match(source, /toFixed\(3\)/)
+  const safety = read('./pages/SafetyBarometer.jsx')
+  assert.match(source, /toFixed\(4\)/)
   assert.match(source, /canonicalWaveEvidence\.unit \?\? 'm'/)
   assert.match(source, /canonicalWindEvidence\.unit \?\? 'm\/s'/)
   assert.match(source, /officialVisibilityEvidence\.unit \?\? 'm'/)
   assert.doesNotMatch(source, /Visibility[\s\S]{0,300}NM/)
+  assert.match(safety, /suffix: ' m\/s'/)
+  assert.match(safety, /suffix: ' m'/)
+  assert.match(safety, /toFixed\(4\)/)
+  assert.doesNotMatch(safety, /kts|NM/)
 })
 
 test('bulletin uses runtime evidence wording and has no literal template markers or stale date', () => {

@@ -11,6 +11,10 @@ export default function SafetyBarometer() {
     officialDirective: 'Required evidence unavailable for the selected operating location.',
   }
   const operatingLocationName = selectedOperatingLocation?.name ?? 'SELECT OPERATING LOCATION'
+  const formatEvidenceValue = (value) => {
+    const numericValue = Number(value)
+    return Number.isFinite(numericValue) ? numericValue.toFixed(4) : value
+  }
   const evidenceValue = (parameter) => {
     if (!selectedOperatingLocation) return null
     const record = locationDecision?.evidence?.find(
@@ -60,14 +64,14 @@ export default function SafetyBarometer() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
                 { label: 'Wave Height', value: evidenceValue('waveHeight'), suffix: ' m', icon: <Waves size={16} /> },
-                { label: 'Wind Speed', value: evidenceValue('windSpeed'), suffix: ' kts', icon: <Wind size={16} /> },
-                { label: 'Visibility', value: evidenceValue('visibility'), suffix: ' NM', icon: <Activity size={16} /> },
+                { label: 'Wind Speed', value: evidenceValue('windSpeed'), suffix: ' m/s', icon: <Wind size={16} /> },
+                { label: 'Visibility', value: evidenceValue('visibility'), suffix: ' m', icon: <Activity size={16} /> },
                 { label: 'Lightning Risk', value: evidenceValue('lightningRiskPercent'), suffix: '%', icon: <Zap size={16} /> }
               ].map((stat) => (
                 <div key={stat.label} className="bg-slate-50/50 border border-slate-100 p-5 rounded-2xl">
                   <div className="text-slate-400 mb-3">{stat.icon}</div>
                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{stat.label}</p>
-                  <p className="text-xl font-black text-slate-800 mt-1">{stat.value == null ? '—' : `${stat.value}${stat.suffix}`}</p>
+                  <p className="text-xl font-black text-slate-800 mt-1">{stat.value == null ? '—' : `${formatEvidenceValue(stat.value)}${stat.suffix}`}</p>
                 </div>
               ))}
             </div>
