@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { MapContainer, TileLayer, WMSTileLayer, Circle, CircleMarker, Polyline, Polygon, Popup, Marker, useMap, useMapEvents } from 'react-leaflet'
 import { Layers, Play, Pause, RotateCcw, MessageSquare, Target, ShieldAlert, Anchor, Send, MapPin, Sparkles, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import 'leaflet/dist/leaflet.css'
@@ -186,7 +186,13 @@ function MapClickHandler({ onMapClick }) {
 }
 
 export default function GISMap() {
-  const { selectedScenario: scenario } = useScenario()
+  const {
+    selectedScenario: scenario,
+    selectedOperatingLocation,
+    setSelectedOperatingLocation,
+    locationDecision,
+    setLocationDecision,
+  } = useScenario()
 
   const route = scenario.trawlerRoute.coordinates
   const imblLine = scenario.imbl.coordinates
@@ -212,9 +218,7 @@ export default function GISMap() {
   const [locationStatus, setLocationStatus] = useState('loading')
   const [locationError, setLocationError] = useState('')
   const [userCoordinates, setUserCoordinates] = useState(null)
-  const [selectedOperatingLocation, setSelectedOperatingLocation] = useState(null)
   const [isOperatingLocationOpen, setIsOperatingLocationOpen] = useState(false)
-  const [locationDecision, setLocationDecision] = useState(null)
   const [isAssistantOpen, setIsAssistantOpen] = useState(false)
   const [isLayersOpen, setIsLayersOpen] = useState(true)
   const [clickedLocation, setClickedLocation] = useState(null)
@@ -1289,6 +1293,7 @@ export default function GISMap() {
                       type="button"
                       onClick={() => {
                         setSelectedOperatingLocation(location)
+                        setLocationDecision(null)
                         setIsOperatingLocationOpen(false)
                       }}
                       className="flex w-full items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-left transition hover:border-violet-200 hover:bg-violet-50"

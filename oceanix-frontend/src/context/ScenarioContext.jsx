@@ -12,6 +12,8 @@ const defaultScenarioId = getDefaultScenarioId()
 
 export function ScenarioProvider({ children }) {
   const [selectedScenarioId, setSelectedScenarioId] = useState(defaultScenarioId)
+  const [selectedOperatingLocation, setSelectedOperatingLocation] = useState(null)
+  const [locationDecision, setLocationDecision] = useState(null)
   const selectedScenario = useMemo(
     () => getMarineScenario(selectedScenarioId),
     [selectedScenarioId]
@@ -23,10 +25,14 @@ export function ScenarioProvider({ children }) {
       selectedScenario,
       selectedDecision: selectedScenario?.decision ?? null,
       setSelectedScenarioId,
+      selectedOperatingLocation,
+      setSelectedOperatingLocation,
+      locationDecision,
+      setLocationDecision,
       scenarios: marineScenarios,
       defaultScenarioId,
     }),
-    [selectedScenarioId, selectedScenario]
+    [selectedScenarioId, selectedScenario, selectedOperatingLocation, locationDecision]
   )
 
   return <ScenarioContext.Provider value={value}>{children}</ScenarioContext.Provider>

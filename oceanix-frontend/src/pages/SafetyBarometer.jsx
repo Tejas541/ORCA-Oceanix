@@ -1,4 +1,3 @@
-import React from 'react'
 import { MapContainer, TileLayer } from 'react-leaflet'
 import { Activity, ShieldCheck, Wind, Waves, Zap, Map as MapIcon } from 'lucide-react'
 import { useScenario } from '../context/ScenarioContext'
@@ -20,9 +19,24 @@ const HealthCard = ({ title, latency, health }) => (
 )
 
 export default function SafetyBarometer() {
-  const { selectedScenario: scenario } = useScenario()
+  const { selectedScenario: scenario, selectedOperatingLocation, locationDecision } = useScenario()
   const satelliteHealth = Object.values(scenario.satelliteHealth)
-  const decision = scenario.decision
+  const decision = locationDecision?.decision ?? (selectedOperatingLocation
+    ? {
+        riskLevel: 'DATA_INSUFFICIENT',
+        safetyScore: null,
+        ventureStatusLabel: 'DATA INSUFFICIENT',
+        officialDirective: 'Required evidence unavailable for the selected operating location.',
+      }
+    : scenario.decision)
+  const operatingLocationName = selectedOperatingLocation?.name ?? scenario.harbour.name
+  const evidenceValue = (parameter, fallback) => {
+    if (!selectedOperatingLocation) return fallback
+    const record = locationDecision?.evidence?.find(
+      (item) => item.parameter === parameter && item.status === 'available'
+    )
+    return record?.value ?? null
+  }
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] pt-24 px-12 pb-12 bg-mesh">
@@ -45,34 +59,39 @@ export default function SafetyBarometer() {
                   <ShieldCheck size={40} />
                 </div>
                 <div>
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-1">{scenario.harbour.name}</p>
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-1">{operatingLocationName}</p>
                   <h2 className="text-4xl font-black text-slate-900 tracking-tight">{decision.ventureStatusLabel}</h2>
                 </div>
               </div>
               <div className="text-right">
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Prototype Safety Index</p>
-                <div className="text-5xl font-black text-slate-900">{decision.safetyScore}<span className="text-xl text-slate-300">/100</span></div>
+                <div className="text-5xl font-black text-slate-900">
+                  {decision.safetyScore == null ? '—' : decision.safetyScore}
+                  {decision.safetyScore != null && <span className="text-xl text-slate-300">/100</span>}
+                </div>
               </div>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-                { label: 'Wave Height', value: `${scenario.oceanConditions.waveHeight} m`, icon: <Waves size={16} /> },
-                { label: 'Wind Speed', value: `${scenario.oceanConditions.windSpeed} kts`, icon: <Wind size={16} /> },
-                { label: 'Sea State', value: scenario.oceanConditions.seaState, icon: <Activity size={16} /> },
-                { label: 'Lightning Risk', value: `${scenario.oceanConditions.lightningRiskPercent}%`, icon: <Zap size={16} /> }
+                {[
+                { label: 'Wave Height', value: evidenceValue('waveHeight', scenario.oceanConditions.waveHeight), suffix: ' m', icon: <Waves size={16} /> },
+                { label: 'Wind Speed', value: evidenceValue('windSpeed', scenario.oceanConditions.windSpeed), suffix: ' kts', icon: <Wind size={16} /> },
+                { label: 'Sea State', value: selectedOperatingLocation ? null : scenario.oceanConditions.seaState, suffix: '', icon: <Activity size={16} /> },
+                { label: 'Lightning Risk', value: evidenceValue('lightningRiskPercent', scenario.oceanConditions.lightningRiskPercent), suffix: '%', icon: <Zap size={16} /> }
               ].map((stat) => (
                 <div key={stat.label} className="bg-slate-50/50 border border-slate-100 p-5 rounded-2xl">
                   <div className="text-slate-400 mb-3">{stat.icon}</div>
                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{stat.label}</p>
-                  <p className="text-xl font-black text-slate-800 mt-1">{stat.value}</p>
+                  <p className="text-xl font-black text-slate-800 mt-1">{stat.value == null ? '—' : `${stat.value}${stat.suffix}`}</p>
                 </div>
               ))}
             </div>
             
             <div className="mt-10 p-4 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center gap-3">
                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping" />
-                <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Demo Guidance: {decision.officialDirective}</p>
+                <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide">
+                  {decision.riskLevel === 'DATA_INSUFFICIENT' ? 'Required evidence unavailable: ' : 'ORCA Guidance: '}{decision.officialDirective}
+                </p>
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import { 
@@ -145,8 +145,24 @@ const ProvenanceStep = ({ number, title, time, detail, subtasks, isActive, isDon
 // --- MAIN PAGE COMPONENT ---
 export default function AgenticChat({ view = 'chat' }) {
   const navigate = useNavigate()
-  const { selectedScenarioId, selectedScenario: scenario, setSelectedScenarioId, scenarios, defaultScenarioId } = useScenario()
-  const decision = scenario.decision
+  const {
+    selectedScenarioId,
+    selectedScenario: scenario,
+    setSelectedScenarioId,
+    scenarios,
+    defaultScenarioId,
+    selectedOperatingLocation,
+    locationDecision,
+  } = useScenario()
+  const decision = locationDecision?.decision ?? (selectedOperatingLocation
+    ? {
+        riskLevel: 'DATA_INSUFFICIENT',
+        safetyScore: null,
+        ventureStatusLabel: 'DATA INSUFFICIENT',
+        officialDirective: 'Required evidence unavailable for the selected operating location.',
+      }
+    : scenario.decision)
+  const operatingLocationName = selectedOperatingLocation?.name ?? scenario.harbour.name
 
   const [isRunning, setIsRunning] = useState(false)
   const [hasCompleted, setHasCompleted] = useState(true) // Start completed with initial scenario
@@ -159,9 +175,12 @@ export default function AgenticChat({ view = 'chat' }) {
 
   // --- 1. SINGLE CANONICAL SOURCE VARIABLE FOR FINAL DISPLAYED ADVISORY TEXT ---
   const finalDisplayedAdvisory = useMemo(() => {
+    if (selectedOperatingLocation) {
+      return `Current operating location: ${operatingLocationName}. ORCA decision: ${decision.riskLevel}. ${decision.safetyScore == null ? 'Safety score unavailable because required evidence is insufficient.' : `Safety score: ${decision.safetyScore}/100.`} ${decision.officialDirective}`
+    }
     const scenarioAdvisories = ADVISORY_TRANSLATIONS[selectedScenarioId] || ADVISORY_TRANSLATIONS[defaultScenarioId]
     return scenarioAdvisories[language] || scenarioAdvisories['English']
-  }, [selectedScenarioId, language, defaultScenarioId])
+  }, [selectedScenarioId, language, defaultScenarioId, selectedOperatingLocation, operatingLocationName, decision])
 
   const dagTimerRef = useRef([])
 
@@ -214,6 +233,7 @@ export default function AgenticChat({ view = 'chat' }) {
   // Auto-detect scenario if query contains scenario keywords
   const handleQueryChange = (newQuery) => {
     setQuery(newQuery)
+    if (selectedOperatingLocation) return
     const q = newQuery.toLowerCase()
     if (q.includes('chennai') || q.includes('pulicat')) {
       setSelectedScenarioId('chennai')
@@ -323,6 +343,7 @@ export default function AgenticChat({ view = 'chat' }) {
   // Handle switching scenario from dropdown or chips
   const handleScenarioSwitch = (newId) => {
     stopSpeech()
+    if (selectedOperatingLocation) return
     setSelectedScenarioId(newId)
     const defaultHints = {
       kochi: 'What are the sea conditions, PFZ suitability, and IMBL distance today?',
@@ -340,8 +361,8 @@ export default function AgenticChat({ view = 'chat' }) {
         number: 1,
         title: "Blue Orbit Simulated Agent Pipeline",
         time: "1.2",
-        detail: `Target Region: ${scenario.region}. Demo query categories: 'pfz_discovery, hazard_assessment, imbl_geofence'. Displayed as a 5-stage simulated pipeline.`,
-        subtasks: ["5-stage execution plan formulated", `Harbour: ${scenario.harbour.name}`],
+        detail: `Operating location: ${operatingLocationName}. ORCA decision context: ${decision.riskLevel}. Demo query categories: 'pfz_discovery, hazard_assessment, imbl_geofence'. Displayed as a 5-stage simulated pipeline.`,
+        subtasks: ["5-stage simulated execution plan", `Operating location: ${operatingLocationName}`],
         confidence: 99.8
       },
       {
@@ -414,7 +435,7 @@ export default function AgenticChat({ view = 'chat' }) {
         <div className="flex items-center justify-center gap-3 mt-4 mb-2">
           <div className="glass-panel px-4 py-1.5 rounded-full border border-slate-200 shadow-sm flex items-center gap-2">
             <Compass size={14} className="text-blue-600" />
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Demo Scenario:</span>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{selectedOperatingLocation ? 'Operating Location:' : 'Demo Scenario:'}</span>
             <select
               value={selectedScenarioId}
               onChange={(e) => handleScenarioSwitch(e.target.value)}
@@ -427,6 +448,11 @@ export default function AgenticChat({ view = 'chat' }) {
               ))}
             </select>
           </div>
+          {selectedOperatingLocation && (
+            <div className="px-3 py-1.5 rounded-full text-[10px] font-black text-blue-700 bg-blue-50 border border-blue-200">
+              {operatingLocationName}
+            </div>
+          )}
 
           <div className={`px-3 py-1 rounded-full text-[9px] font-black tracking-wider uppercase shadow-sm flex items-center gap-1.5 ${
             decision.riskLevel === 'SAFE_FOR_VENTURE' 
@@ -542,7 +568,7 @@ export default function AgenticChat({ view = 'chat' }) {
                         ? 'text-amber-700 bg-amber-50 border-amber-200'
                         : 'text-rose-700 bg-rose-50 border-rose-200'
                     }`}>
-                      SAFETY SCORE: {decision.safetyScore}/100
+                      SAFETY SCORE: {decision.safetyScore == null ? '—' : `${decision.safetyScore}/100`}
                     </div>
                     <button
                       onClick={toggleSpeech}

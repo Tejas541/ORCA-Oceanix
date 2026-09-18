@@ -1,10 +1,17 @@
-import React from 'react'
-import { Printer, Download, Share2, CheckCircle, ShieldCheck, Map as MapIcon } from 'lucide-react'
+import { Printer, Download, ShieldCheck } from 'lucide-react'
 import { useScenario } from '../context/ScenarioContext'
 
 export default function AdvisoryBulletin() {
-  const { selectedScenario: scenario } = useScenario()
-  const decision = scenario.decision
+  const { selectedScenario: scenario, selectedOperatingLocation, locationDecision } = useScenario()
+  const decision = locationDecision?.decision ?? (selectedOperatingLocation
+    ? {
+        riskLevel: 'DATA_INSUFFICIENT',
+        safetyScore: null,
+        ventureStatusLabel: 'DATA INSUFFICIENT',
+        officialDirective: 'Required evidence unavailable for the selected operating location.',
+      }
+    : scenario.decision)
+  const operatingLocationName = selectedOperatingLocation?.name ?? scenario.harbour.name
   const printBulletin = () => window.print()
   const pfzZones = [scenario.pfz, ...scenario.pfz.additionalZones]
 
@@ -51,11 +58,13 @@ export default function AdvisoryBulletin() {
                <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-2 block">Venture Status</span>
                 <h1 className="text-5xl font-black text-slate-900 mb-4 tracking-tighter">{decision.ventureStatusLabel}</h1>
                 <p className="text-sm text-slate-500 leading-relaxed max-w-lg">
-                  {scenario.advisory.summaryEn}
+                  {locationDecision
+                    ? `Operating location: ${operatingLocationName}. ${decision.officialDirective}`
+                    : scenario.advisory.summaryEn}
                </p>
             </div>
             <div className="bg-slate-50 rounded-3xl p-6 flex flex-col items-center justify-center border border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Demo Reference</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase mb-2">{decision.safetyScore == null ? 'Safety score: —' : `Safety score: ${decision.safetyScore}/100`}</p>
                {/* Mock QR Code */}
                <div className="w-24 h-24 bg-white border border-slate-200 p-2 rounded-xl mb-2 flex items-center justify-center">
                   <div className="grid grid-cols-4 gap-1 opacity-20">
