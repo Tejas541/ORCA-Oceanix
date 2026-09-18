@@ -19,6 +19,7 @@ import {
   getOperatingLocationConnection,
   getNearbyMarineOperatingLocations,
 } from '../utils/marineOperatingLocationUi'
+import { getCanonicalCycloneEvidence, getGdacsCycloneDisplay } from '../utils/gdacsCycloneUi'
 
 const trawlerIcon = new L.Icon({
   iconUrl: 'https://cdn-icons-png.flaticon.com/512/2942/2942940.png',
@@ -366,10 +367,18 @@ export default function GISMap() {
   }, [userCoordinates, forecastRequestContext])
 
   const officialVisibilityEvidence = useMemo(
-      () => locationDecision?.evidence?.find(
-          (record) => record.parameter === 'visibility' && record.status === 'available'
-      ) ?? null,
-      [locationDecision]
+    () => locationDecision?.evidence?.find(
+      (record) => record.parameter === 'visibility' && record.status === 'available'
+    ) ?? null,
+    [locationDecision]
+  )
+  const gdacsCycloneEvidence = useMemo(
+    () => getCanonicalCycloneEvidence(locationDecision),
+    [locationDecision]
+  )
+  const gdacsCycloneDisplay = useMemo(
+    () => getGdacsCycloneDisplay(gdacsCycloneEvidence),
+    [gdacsCycloneEvidence]
   )
 
   const officialPfzLines = useMemo(() => {
@@ -631,15 +640,31 @@ export default function GISMap() {
 
           <div className="mb-4 text-[9px] leading-relaxed text-cyan-700 bg-cyan-50 border border-cyan-100 px-2.5 py-2 rounded-lg">
             <div className="font-black uppercase tracking-widest">
-              Official Open-Meteo Visibility
+                Official Open-Meteo Visibility
             </div>
             <div className="mt-1">
-              {officialVisibilityEvidence
+                {officialVisibilityEvidence
                   ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)} ${officialVisibilityEvidence.unit ?? 'm'} forecast for ${officialVisibilityEvidence.forecastTime ?? 'time unavailable'}.`
                   : 'Visibility forecast unavailable; no demo fallback is used.'}
             </div>
             <div className="mt-1 text-cyan-600">
-              Forecast • not live observation · Source: {officialVisibilityEvidence?.provider ?? 'Open-Meteo'}
+                Forecast • not live observation · Source: {officialVisibilityEvidence?.provider ?? 'Open-Meteo'}
+            </div>
+          </div>
+
+          <div className="mb-4 text-[9px] leading-relaxed text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-2 rounded-lg">
+            <div className="font-black uppercase tracking-widest">{gdacsCycloneDisplay.title}</div>
+            <div className="mt-1">
+              {gdacsCycloneDisplay.state === 'active'
+                ? gdacsCycloneDisplay.eventName ?? gdacsCycloneDisplay.category
+                : gdacsCycloneDisplay.message}
+            </div>
+            {gdacsCycloneDisplay.state === 'active' && gdacsCycloneDisplay.eventName && gdacsCycloneDisplay.category && (
+              <div className="mt-1">Category: {gdacsCycloneDisplay.category}</div>
+            )}
+            <div className="mt-1 text-blue-600">
+              {gdacsCycloneDisplay.provider ? `Source: ${gdacsCycloneDisplay.provider}` : 'Source: GDACS'}
+              {gdacsCycloneDisplay.status ? ` · ${gdacsCycloneDisplay.status} • Runtime` : ''}
             </div>
           </div>
 
@@ -821,18 +846,15 @@ export default function GISMap() {
           </span>
         </div>
         <div className="w-px h-6 bg-slate-200 shrink-0" />
-
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-slate-400 uppercase">Visibility</span>
           <span className="text-xs font-black text-slate-800">
-    {officialVisibilityEvidence
-        ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)}${officialVisibilityEvidence.unit ?? 'm'}`
-        : 'Unavailable'}
-  </span>
+            {officialVisibilityEvidence
+              ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)}${officialVisibilityEvidence.unit ?? 'm'}`
+              : 'Unavailable'}
+          </span>
         </div>
-
         <div className="w-px h-6 bg-slate-200 shrink-0" />
-
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-slate-400 uppercase">Safety Index</span>
           <span className="text-xs font-black text-slate-800">
