@@ -2,18 +2,27 @@ import { Printer, Download, ShieldCheck } from 'lucide-react'
 import { useScenario } from '../context/ScenarioContext'
 
 export default function AdvisoryBulletin() {
-  const { selectedScenario: scenario, selectedOperatingLocation, locationDecision } = useScenario()
-  const decision = locationDecision?.decision ?? (selectedOperatingLocation
-    ? {
-        riskLevel: 'DATA_INSUFFICIENT',
-        safetyScore: null,
-        ventureStatusLabel: 'DATA INSUFFICIENT',
-        officialDirective: 'Required evidence unavailable for the selected operating location.',
-      }
-    : scenario.decision)
-  const operatingLocationName = selectedOperatingLocation?.name ?? scenario.harbour.name
+  const { selectedOperatingLocation, locationDecision } = useScenario()
+  const decision = locationDecision?.decision ?? {
+    riskLevel: 'DATA_INSUFFICIENT',
+    safetyScore: null,
+    ventureStatusLabel: 'DATA INSUFFICIENT',
+    officialDirective: 'Required evidence unavailable for the selected operating location.',
+  }
+  const operatingLocationName = selectedOperatingLocation?.name ?? 'SELECT OPERATING LOCATION'
   const printBulletin = () => window.print()
-  const pfzZones = [scenario.pfz, ...scenario.pfz.additionalZones]
+  const pfzZones = []
+
+  if (!selectedOperatingLocation) {
+    return (
+      <div className="min-h-screen bg-slate-50 pt-24 pb-20 px-6 flex items-center justify-center">
+        <div className="bg-white rounded-[2rem] p-10 shadow-xl border border-slate-100 text-center max-w-lg">
+          <h1 className="text-2xl font-black text-slate-900">SELECT OPERATING LOCATION</h1>
+          <p className="mt-3 text-sm text-slate-500">Choose an operating location on the Command Map before opening an advisory bulletin.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 pt-24 pb-20 px-6 bg-mesh print:bg-white print:pt-0">
@@ -47,8 +56,8 @@ export default function AdvisoryBulletin() {
               </p>
             </div>
             <div className="text-right">
-              <div className="text-[10px] font-mono text-slate-400 font-bold">DEMO ADVISORY ID: #{scenario.meta.bulletinId}</div>
-              <div className="text-sm font-black text-slate-900">DATE: {scenario.meta.bulletinDate}</div>
+              <div className="text-[10px] font-mono text-slate-400 font-bold">OPERATING LOCATION: {operatingLocationName}</div>
+              <div className="text-sm font-black text-slate-900">CANONICAL DECISION STATUS</div>
             </div>
           </div>
 
@@ -58,9 +67,7 @@ export default function AdvisoryBulletin() {
                <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-2 block">Venture Status</span>
                 <h1 className="text-5xl font-black text-slate-900 mb-4 tracking-tighter">{decision.ventureStatusLabel}</h1>
                 <p className="text-sm text-slate-500 leading-relaxed max-w-lg">
-                  {locationDecision
-                    ? `Operating location: ${operatingLocationName}. ${decision.officialDirective}`
-                    : scenario.advisory.summaryEn}
+                  `Operating location: ${operatingLocationName}. ${decision.officialDirective}`
                </p>
             </div>
             <div className="bg-slate-50 rounded-3xl p-6 flex flex-col items-center justify-center border border-slate-100">
@@ -77,7 +84,7 @@ export default function AdvisoryBulletin() {
 
           {/* Data Table */}
           <div className="mb-12">
-            <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-4 border-l-4 border-blue-500 pl-3">Identified PFZ Zones</h3>
+            <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-4 border-l-4 border-blue-500 pl-3">Authoritative PFZ Zones</h3>
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-100">
@@ -88,14 +95,16 @@ export default function AdvisoryBulletin() {
                 </tr>
               </thead>
               <tbody className="text-sm font-bold text-slate-700">
-                {pfzZones.map((zone) => (
+                {pfzZones.length > 0 ? pfzZones.map((zone) => (
                   <tr key={zone.name} className="border-b border-slate-50">
                     <td className="py-4">{zone.targetSpecies}</td>
                     <td className="py-4 font-mono text-xs">{zone.coordinates[0]}°N, {zone.coordinates[1]}°E</td>
                     <td className="py-4 font-mono text-xs">{zone.depthMeters} m</td>
                     <td className="py-4 text-emerald-500 text-right">{zone.confidence}%</td>
                   </tr>
-                ))}
+                )) : (
+                  <tr><td colSpan="4" className="py-6 text-sm font-medium text-slate-500">Unavailable for selected location</td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -106,7 +115,7 @@ export default function AdvisoryBulletin() {
             <div>
               <p className="text-[10px] font-black text-rose-500 uppercase mb-1 tracking-widest">IMBL Compliance Alert</p>
               <p className="text-xs text-rose-700 leading-relaxed">
-                This demo visualizes a {scenario.imbl.bufferNm} NM buffer near {scenario.imbl.name}. Route and proximity alerts use simulated scenario data.
+                No location-specific IMBL geometry is available from the current canonical evidence.
               </p>
             </div>
           </div>

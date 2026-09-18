@@ -37,9 +37,10 @@ test('canonical decision consumers use shared location state and fail closed', (
   }
 })
 
-test('AI scenario controls cannot override a GIS-selected operating location', () => {
+test('AI assistant is current-location-only and exposes no scenario controls', () => {
   const source = read('./pages/AgenticChat.jsx')
-  assert.match(source, /if \(selectedOperatingLocation\) return/)
+  assert.doesNotMatch(source, /handleScenarioSwitch/)
+  assert.doesNotMatch(source, /Nearest Tuna PFZ|Sea Venture Safety|Cyclone Warnings/)
   assert.match(source, /Current operating location:/)
 })
 
@@ -50,4 +51,34 @@ test('navigation labels and pathname-based active state are defined', () => {
   }
   assert.match(source, /useLocation/)
   assert.match(source, /pathname === to/)
+})
+
+test('workspace pages contain no legacy location-specific UI chunks', () => {
+  const pages = [
+    './pages/App.jsx',
+    './pages/GISMap.jsx',
+    './pages/SafetyBarometer.jsx',
+    './pages/AgenticChat.jsx',
+    './pages/AdvisoryBulletin.jsx',
+  ].filter((file) => fs.existsSync(path.join(here, file)))
+    .map((file) => read(file))
+    .join('\n')
+  for (const legacyText of ['Nearest Tuna PFZ (Kochi)', 'Sea Venture Safety (Chennai)', 'Cyclone Warnings (Bay of Bengal)', 'Kochi Fishing Harbour']) {
+    assert.doesNotMatch(pages, new RegExp(legacyText.replace(/[()]/g, '\\$&'), 'i'))
+  }
+})
+
+test('pages use an explicit select-location state rather than a scenario fallback', () => {
+  for (const page of ['./pages/SafetyBarometer.jsx', './pages/AgenticChat.jsx', './pages/AdvisoryBulletin.jsx']) {
+    const source = read(page)
+    assert.match(source, /SELECT OPERATING LOCATION/)
+    assert.doesNotMatch(source, /selectedOperatingLocation\?\.[^\n]+\|\|/)
+  }
+})
+
+test('advisory bulletin does not render legacy PFZ or IMBL fixture rows', () => {
+  const source = read('./pages/AdvisoryBulletin.jsx')
+  assert.match(source, /const pfzZones = \[\]/)
+  assert.match(source, /Unavailable for selected location/)
+  assert.match(source, /No location-specific IMBL geometry/)
 })

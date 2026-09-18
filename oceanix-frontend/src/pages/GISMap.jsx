@@ -200,12 +200,9 @@ export default function GISMap() {
   const bufferRing = imblBufferPolygon(imblLine, bufferNm)
 
   const [activeLayers, setActiveLayers] = useState([
-    'PFZ',
+    'OFFICIAL_PFZ',
     'INCOIS_SST',
     'INCOIS_CHL',
-    'IMBL',
-    'MPA',
-    'CYCLONE',
   ])
   const [isSimulating, setIsSimulating] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
@@ -227,7 +224,7 @@ export default function GISMap() {
     {
       id: 1,
       sender: 'assistant',
-      text: scenario.advisory.summaryEn,
+      text: 'Select an operating location to load location-specific canonical evidence.',
       time: 'Just now',
     },
   ])
@@ -236,9 +233,7 @@ export default function GISMap() {
     setLocationStatus('loading')
     setLocationError('')
     setUserCoordinates(null)
-    setSelectedOperatingLocation(null)
     setIsOperatingLocationOpen(false)
-    setLocationDecision(null)
 
     try {
       const coordinates = await requestBrowserLocation()
@@ -409,7 +404,9 @@ export default function GISMap() {
       {
         id: Date.now(),
         sender: 'assistant',
-        text: scenario.advisory.summaryEn,
+        text: selectedOperatingLocation
+          ? `Current operating location: ${selectedOperatingLocation.name}. Canonical evidence is loading or unavailable.`
+          : 'Select an operating location to load location-specific canonical evidence.',
         time: 'Just now',
       },
     ])
@@ -425,9 +422,7 @@ export default function GISMap() {
     }
   }, [chatMessages])
 
-  const liveImblNm = isSimulating
-    ? distanceToPolylineNm(boatPosition, imblLine)
-    : scenario.imbl.distanceFromHarbourNm
+  const liveImblNm = null
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -443,7 +438,7 @@ export default function GISMap() {
       {
         id: Date.now(),
         type: 'IMBL',
-        message: scenario.imbl.alertMessage,
+        message: 'Location-specific geofence evidence is unavailable.',
       },
     ])
   }
@@ -510,18 +505,14 @@ export default function GISMap() {
     let responseText = ''
     const q = queryText.toLowerCase()
 
-    if (q.includes('condition') || q.includes('sea') || q.includes('wave') || q.includes('wind')) {
-      responseText = `At ${scenario.harbour.name}, sea state is ${scenario.oceanConditions.seaState} with wave height of ${scenario.oceanConditions.waveHeight}m and wind speed of ${scenario.oceanConditions.windSpeed} kts (${scenario.oceanConditions.windDirection}). Visibility: ${scenario.oceanConditions.visibility} NM. Lightning risk: ${scenario.oceanConditions.lightningRiskPercent}%.`
-    } else if (q.includes('pfz') || q.includes('fish') || q.includes('sardine') || q.includes('tuna') || q.includes('zone')) {
-      responseText = `Primary PFZ: ${scenario.pfz.name} targeting ${scenario.pfz.targetSpecies} at coordinates [${scenario.pfz.coordinates.join(', ')}] (${scenario.pfz.distanceFromHarbourKm} km from harbour). Confidence: ${scenario.pfz.confidence}%. ${scenario.pfz.reason}`
-    } else if (q.includes('imbl') || q.includes('border') || q.includes('geofence') || q.includes('buffer')) {
-      responseText = `Demo IMBL boundary is ${scenario.imbl.distanceFromHarbourNm} NM from harbour. Active vessel distance: ${liveImblNm.toFixed(1)} NM. Status: ${liveImblNm <= scenario.imbl.bufferNm ? '⚠️ INSIDE BUFFER ZONE' : '✅ SAFE COMPLIANCE'}.`
-    } else if (q.includes('safety') || q.includes('score') || q.includes('venture') || q.includes('risk')) {
+    if (q.includes('safety') || q.includes('score') || q.includes('venture') || q.includes('risk')) {
       responseText = locationDecision?.decision
-        ? `Location-specific Safety Index: ${locationDecision.decision.safetyScore}/100 (${locationDecision.decision.riskLevel}). Status: ${locationDecision.decision.ventureStatusLabel}. Directive: ${locationDecision.decision.officialDirective}`
+        ? `Location-specific ORCA decision: ${locationDecision.decision.safetyScore == null ? 'DATA_INSUFFICIENT' : `${locationDecision.decision.safetyScore}/100`} (${locationDecision.decision.riskLevel}). Status: ${locationDecision.decision.ventureStatusLabel}. Directive: ${locationDecision.decision.officialDirective}`
         : 'Location-specific safety decision is unavailable until usable marine evidence is available.'
     } else {
-      responseText = `[${scenario.region}] ${scenario.advisory.summaryEn}`
+      responseText = selectedOperatingLocation
+        ? `Current operating location: ${selectedOperatingLocation.name}. Location-specific evidence is available only from the canonical sources shown in the Data Sources panel.`
+        : 'Select an operating location to begin.'
     }
 
     const aiMsg = {
@@ -533,16 +524,14 @@ export default function GISMap() {
 
     setChatMessages(prev => [...prev, userMsg, aiMsg])
     setChatInput('')
-  }, [scenario, liveImblNm, locationDecision])
+  }, [selectedOperatingLocation, locationDecision])
 
   // Handle map click inspection
   const handleMapClick = useCallback((coords) => {
     if (!userCoordinates) return
     setClickedLocation(coords)
     const distUser = haversineNm(coords, [userCoordinates.latitude, userCoordinates.longitude])
-    const distImbl = distanceToPolylineNm(coords, imblLine)
-
-    const locMsgText = `Inspecting Location [${coords[0].toFixed(4)}°N, ${coords[1].toFixed(4)}°E]: ${distUser.toFixed(1)} NM from Your Location, ${distImbl.toFixed(1)} NM from demo IMBL.`
+    const locMsgText = `Inspecting Location [${coords[0].toFixed(4)}°N, ${coords[1].toFixed(4)}°E]: ${distUser.toFixed(1)} NM from Your Location. Location-specific IMBL evidence is unavailable.`
 
     const userMsg = {
       id: Date.now(),
@@ -674,13 +663,9 @@ export default function GISMap() {
 
           <div className="space-y-2">
             {[
-                { id: 'PFZ', label: 'Simulated PFZ Fishing Zones', color: 'bg-emerald-500', icon: <Target size={14}/> },
                 { id: 'OFFICIAL_PFZ', label: 'Official INCOIS PFZ Geometry', color: 'bg-violet-500', icon: <Target size={14}/> },
                 { id: 'INCOIS_SST', label: 'Official INCOIS WMS — SST', color: 'bg-cyan-500', icon: <Layers size={14}/> },
                 { id: 'INCOIS_CHL', label: 'Official INCOIS WMS — Chlorophyll', color: 'bg-sky-500', icon: <Layers size={14}/> },
-                { id: 'IMBL', label: 'IMBL Border Buffer', color: 'bg-rose-500', icon: <ShieldAlert size={14}/> },
-                { id: 'MPA', label: 'MPA Eco Reserves', color: 'bg-orange-400', icon: <Anchor size={14}/> },
-                { id: 'CYCLONE', label: 'Cyclone Track', color: 'bg-blue-600', icon: <Layers size={14}/> }
             ].map((layer) => (
                 <button
                   key={layer.id}
@@ -696,47 +681,6 @@ export default function GISMap() {
             ))}
           </div>
 
-          {/* Simulation Control Section */}
-          <div className="mt-6 pt-4 border-t border-slate-200/60">
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
-                <span>Trawler Simulation</span>
-                <span className="text-slate-500 font-mono">{scenario.trawlerRoute.vesselId}</span>
-            </div>
-
-            {!isSimulating ? (
-                <button
-                  onClick={triggerSimulation}
-                  className="w-full bg-slate-900 text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-md active:scale-98"
-                >
-                  <Play size={13} fill="white" /> Start Trawler Route
-                </button>
-            ) : (
-                <div className="flex gap-2">
-                  {isAnimating ? (
-                    <button
-                      onClick={pauseSimulation}
-                      className="flex-1 bg-amber-500 text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-amber-600 transition-all"
-                    >
-                      <Pause size={13} /> Pause
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => setIsAnimating(true)}
-                      className="flex-1 bg-emerald-600 text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-emerald-700 transition-all"
-                    >
-                      <Play size={13} fill="white" /> Resume
-                    </button>
-                  )}
-                  <button
-                    onClick={resetSimulation}
-                    className="bg-slate-200 text-slate-700 p-2 rounded-xl hover:bg-slate-300 transition-all"
-                    title="Reset Route"
-                  >
-                    <RotateCcw size={14} />
-                  </button>
-                </div>
-            )}
-          </div>
         </div> : null}
       </div>
 
@@ -780,19 +724,6 @@ export default function GISMap() {
                 </div>
             ))}
             <div ref={chatEndRef} />
-          </div>
-
-          {/* Query Hints Chips */}
-          <div className="px-4 py-2 bg-slate-50/80 border-t border-slate-100 flex flex-wrap gap-1.5 shrink-0">
-            {scenario.advisory.queryHints.map((hint, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleUserQuery(hint)}
-                  className="text-[9px] font-bold bg-white text-blue-600 border border-blue-100 hover:bg-blue-50 px-2.5 py-1 rounded-full transition-all text-left"
-                >
-                  {hint}
-                </button>
-            ))}
           </div>
 
           {/* Input Area */}
@@ -880,7 +811,7 @@ export default function GISMap() {
         <div className="w-px h-6 bg-slate-200 shrink-0" />
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-slate-400 uppercase">IMBL Dist</span>
-          <span className="text-xs font-black text-slate-800">{liveImblNm.toFixed(1)} NM</span>
+          <span className="text-xs font-black text-slate-800">—</span>
         </div>
       </div>
 

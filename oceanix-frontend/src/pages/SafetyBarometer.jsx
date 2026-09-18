@@ -2,52 +2,37 @@ import { MapContainer, TileLayer } from 'react-leaflet'
 import { Activity, ShieldCheck, Wind, Waves, Zap, Map as MapIcon } from 'lucide-react'
 import { useScenario } from '../context/ScenarioContext'
 
-const HealthCard = ({ title, latency, health }) => (
-  <div className="bg-white/80 backdrop-blur-md p-5 rounded-2xl border border-slate-100 shadow-sm">
-    <div className="flex justify-between items-start mb-4">
-      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{title}</h4>
-      <span className="text-[10px] px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold border border-emerald-100">{health} Health</span>
-    </div>
-    <div className="flex items-end justify-between">
-       <div className="space-y-1">
-          <p className="text-xs font-bold text-slate-800">Latency: {latency}</p>
-          <p className="text-[10px] text-blue-500 font-medium">Simulated Scenario Data</p>
-       </div>
-       <Activity size={20} className="text-slate-200" />
-    </div>
-  </div>
-)
-
 export default function SafetyBarometer() {
-  const { selectedScenario: scenario, selectedOperatingLocation, locationDecision } = useScenario()
-  const satelliteHealth = Object.values(scenario.satelliteHealth)
-  const decision = locationDecision?.decision ?? (selectedOperatingLocation
-    ? {
-        riskLevel: 'DATA_INSUFFICIENT',
-        safetyScore: null,
-        ventureStatusLabel: 'DATA INSUFFICIENT',
-        officialDirective: 'Required evidence unavailable for the selected operating location.',
-      }
-    : scenario.decision)
-  const operatingLocationName = selectedOperatingLocation?.name ?? scenario.harbour.name
-  const evidenceValue = (parameter, fallback) => {
-    if (!selectedOperatingLocation) return fallback
+  const { selectedOperatingLocation, locationDecision } = useScenario()
+  const decision = locationDecision?.decision ?? {
+    riskLevel: 'DATA_INSUFFICIENT',
+    safetyScore: null,
+    ventureStatusLabel: 'DATA INSUFFICIENT',
+    officialDirective: 'Required evidence unavailable for the selected operating location.',
+  }
+  const operatingLocationName = selectedOperatingLocation?.name ?? 'SELECT OPERATING LOCATION'
+  const evidenceValue = (parameter) => {
+    if (!selectedOperatingLocation) return null
     const record = locationDecision?.evidence?.find(
       (item) => item.parameter === parameter && item.status === 'available'
     )
     return record?.value ?? null
   }
 
+  if (!selectedOperatingLocation) {
+    return (
+      <div className="min-h-screen bg-[#F9FAFB] pt-24 px-12 pb-12 flex items-center justify-center">
+        <div className="bg-white rounded-[2.5rem] p-10 shadow-xl border border-slate-100 text-center max-w-lg">
+          <h1 className="text-2xl font-black text-slate-900">SELECT OPERATING LOCATION</h1>
+          <p className="mt-3 text-sm text-slate-500">Choose an operating location on the Command Map before viewing safety status.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[#F9FAFB] pt-24 px-12 pb-12 bg-mesh">
-      {/* 1. Top Health Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {satelliteHealth.map((source) => (
-          <HealthCard key={source.title} {...source} />
-        ))}
-      </div>
-
-      {/* 2. Main Safety Analysis Panel */}
+      {/* Main Safety Analysis Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-[2.5rem] p-10 shadow-xl border border-slate-100 relative overflow-hidden">
@@ -74,10 +59,10 @@ export default function SafetyBarometer() {
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                { label: 'Wave Height', value: evidenceValue('waveHeight', scenario.oceanConditions.waveHeight), suffix: ' m', icon: <Waves size={16} /> },
-                { label: 'Wind Speed', value: evidenceValue('windSpeed', scenario.oceanConditions.windSpeed), suffix: ' kts', icon: <Wind size={16} /> },
-                { label: 'Sea State', value: selectedOperatingLocation ? null : scenario.oceanConditions.seaState, suffix: '', icon: <Activity size={16} /> },
-                { label: 'Lightning Risk', value: evidenceValue('lightningRiskPercent', scenario.oceanConditions.lightningRiskPercent), suffix: '%', icon: <Zap size={16} /> }
+                { label: 'Wave Height', value: evidenceValue('waveHeight'), suffix: ' m', icon: <Waves size={16} /> },
+                { label: 'Wind Speed', value: evidenceValue('windSpeed'), suffix: ' kts', icon: <Wind size={16} /> },
+                { label: 'Visibility', value: evidenceValue('visibility'), suffix: ' NM', icon: <Activity size={16} /> },
+                { label: 'Lightning Risk', value: evidenceValue('lightningRiskPercent'), suffix: '%', icon: <Zap size={16} /> }
               ].map((stat) => (
                 <div key={stat.label} className="bg-slate-50/50 border border-slate-100 p-5 rounded-2xl">
                   <div className="text-slate-400 mb-3">{stat.icon}</div>
@@ -103,7 +88,7 @@ export default function SafetyBarometer() {
                 <MapIcon size={16} className="text-slate-300" />
             </div>
             <div className="flex-1 rounded-[1.8rem] overflow-hidden border border-slate-100">
-                <MapContainer center={scenario.harbour.coordinates} zoom={8} className="h-full w-full" zoomControl={false}>
+                <MapContainer center={[selectedOperatingLocation.latitude, selectedOperatingLocation.longitude]} zoom={8} className="h-full w-full" zoomControl={false}>
                     <TileLayer
                       url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
                       attribution="&copy; OpenStreetMap contributors"
