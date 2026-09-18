@@ -8,6 +8,7 @@ import {
     fetchOpenMeteoForecast,
     OPEN_METEO_LIGHTNING_PARAMETER,
 } from './openMeteoService.js'
+import { fetchGdacsCyclone, GDACS_ATTRIBUTION } from './gdacsCycloneService.js'
 
 const INCOIS_PROVIDER = 'INCOIS ERDDAP'
 const DEFAULT_COORDINATE_POLICY = 'direct_coordinate_request_no_snapping'
@@ -128,6 +129,30 @@ function unavailableOpenMeteoEvidence({
     })
 }
 
+function unavailableGdacsEvidence({
+  latitude,
+  longitude,
+  coordinateRole,
+  coordinatePolicy,
+  error,
+}) {
+  return createUnavailableParameterEvidence({
+    parameter: 'cyclone',
+    provider: 'GDACS',
+    source: 'GDACS tropical cyclone events',
+    endpoint: 'https://www.gdacs.org/gdacsapi/api/Events/geteventlist/SEARCH',
+    location: [latitude, longitude],
+    coordinateRole,
+    coordinatePolicy,
+    sourceDataStatus: 'unavailable',
+    sourceMetadata: { attribution: GDACS_ATTRIBUTION },
+    error: {
+      code: error?.code ?? 'GDACS_REQUEST_FAILED',
+      message: error?.message ?? 'GDACS request failed',
+    },
+  })
+}
+
 export function mapIncoisMarineParametersToEvidence(result = {}) {
   const parameter = result.parameters?.significantWaveHeight
   const location = parameter
@@ -243,6 +268,7 @@ export async function getIncoisOrcaDecision({
                                                 getWave = fetchIncoisWave,
                                                 getWind = fetchIncoisWind,
                                                 getWeather = fetchOpenMeteoForecast,
+                                                getCyclone = fetchGdacsCyclone,
                                             } = {}) {
     const request = {
         latitude,
@@ -253,11 +279,12 @@ export async function getIncoisOrcaDecision({
         coordinatePolicy,
     }
 
-    const [waveResponse, windResponse, weatherResponse] =
+    const [waveResponse, windResponse, weatherResponse, cycloneResponse] =
         await Promise.allSettled([
             getWave(request),
             getWind(request),
             getWeather(request),
+            getCyclone(request),
         ])
 
     const waveResult =
@@ -269,6 +296,10 @@ export async function getIncoisOrcaDecision({
     const weatherResult =
         weatherResponse.status === 'fulfilled'
             ? weatherResponse.value
+            : null
+    const cycloneResult =
+        cycloneResponse.status === 'fulfilled'
+            ? cycloneResponse.value
             : null
   const evidence = [
     ...(waveResult?.evidence ?? [unavailableOsfEvidence({
@@ -305,6 +336,13 @@ export async function getIncoisOrcaDecision({
               error: weatherResponse.reason,
           }),
       ]),
+      ...(cycloneResult?.evidence ?? [unavailableGdacsEvidence({
+        latitude,
+        longitude,
+        coordinateRole,
+        coordinatePolicy,
+        error: cycloneResponse.reason,
+      })]),
   ]
   const aggregated = aggregateEvidence(evidence)
 
@@ -312,8 +350,9 @@ export async function getIncoisOrcaDecision({
     source: {
       provider: 'INCOIS',
       wave: waveResult?.source ?? null,
-      wind: windResult?.source ?? null,
+        wind: windResult?.source ?? null,
         weather: weatherResult?.source ?? null,
+        cyclone: cycloneResult?.source ?? null,
     },
     requestContext: {
       coordinateRole,
@@ -324,8 +363,9 @@ export async function getIncoisOrcaDecision({
       coordinateRole,
       coordinatePolicy,
       wave: waveResult?.provenance ?? null,
-      wind: windResult?.provenance ?? null,
+        wind: windResult?.provenance ?? null,
         weather: weatherResult?.provenance ?? null,
+        cyclone: cycloneResult?.provenance ?? null,
     },
     evidence: aggregated.evidence,
     aggregation: aggregated.aggregation,
