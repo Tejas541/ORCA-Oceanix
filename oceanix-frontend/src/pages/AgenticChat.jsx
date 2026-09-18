@@ -35,15 +35,15 @@ const LANGUAGE_CODES = {
 
 
 // --- SUB-COMPONENT: PROVENANCE STEP ---
-const ProvenanceStep = ({ number, title, time, detail, subtasks, isActive, isDone, confidence }) => (
+const ProvenanceStep = ({ number, title, time, detail, subtasks, isActive, isDone, confidence, horizontal = false }) => (
   <motion.div 
     initial={{ opacity: 0, x: -20 }}
     animate={{ opacity: 1, x: 0 }}
     transition={{ delay: number * 0.1 }}
-    className="relative pl-10 pb-7 last:pb-0"
+    className={horizontal ? 'relative min-w-[220px] flex-1 pb-0 pt-10' : 'relative pl-10 pb-7 last:pb-0'}
   >
     {/* Connector Line */}
-    <div className={`absolute left-[15px] top-0 bottom-0 w-px transition-colors duration-500 last:hidden ${
+    <div className={`${horizontal ? 'absolute left-[15px] right-0 top-[15px] h-px' : 'absolute left-[15px] top-0 bottom-0 w-px'} transition-colors duration-500 last:hidden ${
       isDone ? 'bg-emerald-300' : isActive ? 'bg-blue-300' : 'bg-slate-200'
     }`} />
     
@@ -430,10 +430,10 @@ export default function AgenticChat({ view = 'chat' }) {
       </div>
 
       {/* 2. DYNAMIC CONTENT AREA */}
-      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className={`max-w-6xl mx-auto grid grid-cols-1 ${view === 'agents' ? 'lg:grid-cols-1' : 'lg:grid-cols-12'} gap-8`}>
         
         {/* LEFT COLUMN: SYNTHESIZED OUTPUT */}
-        <div className={`${view === 'agents' ? 'lg:col-span-7' : 'lg:col-span-12 max-w-4xl mx-auto w-full'} space-y-6`}>
+        <div className={`${view === 'agents' ? 'lg:col-span-12' : 'lg:col-span-12 max-w-4xl mx-auto w-full'} space-y-6`}>
           <AnimatePresence mode="wait">
             {hasCompleted && (
               <motion.div 
@@ -573,8 +573,8 @@ export default function AgenticChat({ view = 'chat' }) {
         </div>
 
         {/* RIGHT COLUMN: PROVENANCE CHAIN */}
-        {view === 'agents' && <div className="lg:col-span-5">
-          <div className="bg-white/70 backdrop-blur-sm rounded-3xl p-6 md:p-8 border border-white/60 shadow-sm h-full">
+        {view === 'agents' && <div className="lg:col-span-12">
+          <div className="bg-white/70 backdrop-blur-sm rounded-3xl p-6 md:p-8 border border-white/60 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
                 <Cpu size={14} /> Simulated Agent Pipeline
@@ -587,7 +587,7 @@ export default function AgenticChat({ view = 'chat' }) {
               </div>
             </div>
 
-            <div className="space-y-0">
+            <div className="flex gap-4 overflow-x-auto pb-2">
               {steps.map((step, idx) => {
                 const isActive = isRunning && activeStepIndex === idx
                 const isDone = activeStepIndex > idx
@@ -602,6 +602,7 @@ export default function AgenticChat({ view = 'chat' }) {
                     confidence={step.confidence}
                     isActive={isActive}
                     isDone={isDone}
+                    horizontal
                   />
                 )
               })}

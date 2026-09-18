@@ -127,3 +127,22 @@ test('bulletin uses runtime evidence wording and has no literal template markers
   assert.doesNotMatch(source, /`Operating location: \$\{operatingLocationName\}/)
   assert.doesNotMatch(source, /2026-08-31/)
 })
+
+test('Agent Workflow places the advisory above a wide horizontal simulated pipeline', () => {
+  const source = read('./pages/AgenticChat.jsx')
+  assert.match(source, /view === 'agents' \? 'lg:grid-cols-1'/)
+  assert.match(source, /view === 'agents' \? 'lg:col-span-12'/)
+  assert.match(source, /flex gap-4 overflow-x-auto/)
+  assert.match(source, /horizontal = false/)
+  assert.match(source, /horizontal \? 'relative min-w-\[220px\] flex-1 pb-0 pt-10'/)
+  assert.match(source, /right-0 top-\[15px\] h-px/)
+  assert.equal((source.match(/<ProvenanceStep/g) ?? []).length, 1)
+  for (const stage of ['Blue Orbit Simulated Agent Pipeline', 'Simulated Marine EO Data Stage', 'Weather & Marine Hazard Stage', 'PFZ Evidence Stage', 'Geospatial & Geofencing Stage']) {
+    assert.match(source, new RegExp(stage))
+  }
+  assert.match(source, /Operating location:/)
+  assert.match(source, /No fabricated satellite values/)
+  assert.match(source, /No unrelated demo PFZ/)
+  assert.match(source, /No unrelated demo IMBL/)
+  assert.match(source, /Simulated Agent Pipeline/)
+})
