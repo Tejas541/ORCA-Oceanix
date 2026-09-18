@@ -38,6 +38,8 @@ function unavailableResult({
     isLive: false,
     validation: 'missing',
     quality: {
+      coordinateRole,
+      coordinatePolicy,
       sourceDataStatus: 'unavailable',
       ...(error ? { sourceError: error } : {}),
     },
@@ -347,6 +349,8 @@ export async function fetchIncoisWind({
       reason: 'source_unavailable',
       endpoint: INCOIS_OSF_PAGE_ENDPOINT,
       location,
+      coordinateRole,
+      coordinatePolicy,
       error: {
         code: error.code ?? 'INCOIS_WIND_REQUEST_FAILED',
         message: error.message,
