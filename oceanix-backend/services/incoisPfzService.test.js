@@ -108,13 +108,35 @@ test('unavailable INCOIS returns structured unavailable data without fallback', 
   assert.equal(result.evidence[0].validation, 'missing')
 })
 
+test('PFZ timeout is reported as unavailable without throwing', async () => {
+  const result = await fetchIncoisPfz({
+    fetchImpl: async () => {
+      throw Object.assign(new Error('request aborted'), { name: 'AbortError' })
+    },
+  })
+
+  assert.equal(result.status, 'unavailable')
+  assert.equal(result.reason, 'source_timeout')
+  assert.equal(result.evidence[0].value, null)
+})
+
 test('malformed PFZ response is reported as unavailable', async () => {
   const result = await fetchIncoisPfz({
-    fetchImpl: async () => response({ features: [] }),
+    fetchImpl: async () => response({ features: 'not-an-array' }),
   })
 
   assert.equal(result.status, 'unavailable')
   assert.equal(result.reason, 'malformed_response')
+})
+
+test('empty PFZ FeatureCollection is reported separately without crashing', async () => {
+  const result = await fetchIncoisPfz({
+    fetchImpl: async () => response({ type: 'FeatureCollection', features: [] }),
+  })
+
+  assert.equal(result.status, 'unavailable')
+  assert.equal(result.reason, 'empty_feature_collection')
+  assert.equal(result.evidence[0].value, null)
 })
 
 test('PFZ evidence builder preserves official data without mapping safety values', () => {
@@ -170,4 +192,70 @@ test('identical PFZ payloads with the same retrieval time are deterministic', as
     await fetchIncoisPfz(options),
     await fetchIncoisPfz(options)
   )
+})
+
+test('selected operating coordinates produce nearest-line supplemental evidence', async () => {
+  const result = await fetchIncoisPfz({
+    latitude: 18.85,
+    longitude: 72.55,
+    coordinateRole: 'selected_operating_location',
+    coordinatePolicy: 'direct_coordinate_request_no_snapping',
+    retrievedAt: '2026-09-18T06:00:00.000Z',
+    fetchImpl: async () => response({ type: 'FeatureCollection', features: [feature] }),
+  })
+
+  assert.deepEqual(result.spatial.selectedCoordinates, {
+    latitude: 18.85,
+    longitude: 72.55,
+  })
+  assert.equal(result.spatial.coordinateRole, 'selected_operating_location')
+  assert.equal(result.spatial.coordinatePolicy, 'direct_coordinate_request_no_snapping')
+  assert.equal(result.spatial.geometryAvailable, true)
+  assert.equal(result.spatial.nearestFeature.uid, '2026258001')
+  assert.equal(result.spatial.nearestFeature.year, 2026)
+  assert.equal(result.spatial.nearestFeature.julianDay, '258')
+  assert.equal(result.spatial.nearestFeature.geometryType, 'MultiLineString')
+  assert.equal(result.spatial.pointOnLine, true)
+  assert.equal(result.spatial.distanceKm, 0)
+  assert.equal(result.evidence[0].value.distanceKm, 0)
+  assert.equal(result.evidence[0].quality.coordinateRole, 'selected_operating_location')
+  assert.match(JSON.stringify(result), /distanceKm/)
+  assert.doesNotMatch(JSON.stringify(result).toLowerCase(), /safe to fish|best fishing zone|catch probability/)
+})
+
+test('nearest-feature distance is geographic kilometres and preserves feature identity', async () => {
+  const distant = {
+    ...feature,
+    properties: { ...feature.properties, UID: 'far-away' },
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [[[80, 20], [80.1, 20.1]]],
+    },
+  }
+  const result = await fetchIncoisPfz({
+    latitude: 18.8,
+    longitude: 72.5,
+    fetchImpl: async () => response({ type: 'FeatureCollection', features: [distant, feature] }),
+  })
+
+  assert.equal(result.spatial.nearestFeature.uid, '2026258001')
+  assert.equal(result.spatial.distanceKm, 0)
+  assert.equal(result.evidence[0].quality.coordinatePolicy, 'direct_coordinate_request_no_snapping')
+})
+
+test('missing geometry remains failure-safe without fabricating spatial facts', async () => {
+  const result = await fetchIncoisPfz({
+    latitude: 18.8,
+    longitude: 72.5,
+    fetchImpl: async () => response({
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: null, properties: { UID: 'no-geometry' } }],
+    }),
+  })
+
+  assert.equal(result.status, 'available')
+  assert.equal(result.spatial.geometryAvailable, false)
+  assert.equal(result.spatial.nearestFeature, null)
+  assert.equal(result.spatial.distanceKm, null)
+  assert.equal(result.spatial.spatialRelation, 'geometry_unavailable')
 })

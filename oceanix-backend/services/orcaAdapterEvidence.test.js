@@ -414,3 +414,72 @@ test('ORCA preserves partial and unavailable OSF evidence without fallback value
     })
   }
 })
+
+test('ORCA passes selected coordinates to PFZ and keeps PFZ supplemental', async () => {
+  const calls = []
+  const result = await getIncoisOrcaDecision({
+    latitude: 18.94527777777778,
+    longitude: 72.94,
+    coordinateRole: 'selected_operating_location',
+    coordinatePolicy: 'direct_coordinate_request_no_snapping',
+    getWave: async () => osfResponse('waveHeight', 1.2),
+    getWind: async () => osfResponse('windSpeed', 2.3),
+    getPfz: async (request) => {
+      calls.push(request)
+      return {
+        source: { provider: 'INCOIS', name: 'INCOIS PFZ WFS' },
+        provenance: { coordinateRole: request.coordinateRole },
+        evidence: [createEvidenceRecord({
+          provider: 'INCOIS',
+          source: 'INCOIS PFZ WFS',
+          endpoint: 'https://incois.test/pfz',
+          parameter: 'pfz',
+          value: {
+            geometryAvailable: true,
+            spatialRelation: 'nearest_pfz_line',
+            distanceKm: 12.345,
+            nearestFeature: { uid: 'pfz-1', year: 2026, julianDay: 260 },
+          },
+          location: [18.94527777777778, 72.94],
+          status: 'available',
+          validation: 'valid',
+          quality: { coordinateRole: request.coordinateRole },
+        })],
+      }
+    },
+    getWeather: async () => weatherResponse(),
+    getCyclone: async () => cycloneResponse(),
+  })
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].latitude, 18.94527777777778)
+  assert.equal(calls[0].longitude, 72.94)
+  assert.equal(calls[0].coordinateRole, 'selected_operating_location')
+  assert.equal(result.evidence.find(({ parameter }) => parameter === 'pfz').value.distanceKm, 12.345)
+  assert.equal(result.aggregation.missingParameters.includes('pfz'), false)
+  assert.equal(result.provenance.pfz.coordinateRole, 'selected_operating_location')
+})
+
+test('PFZ failure remains unavailable supplemental evidence and does not alter ORCA required parameters', async () => {
+  const result = await getIncoisOrcaDecision({
+    latitude: 18.94527777777778,
+    longitude: 72.94,
+    coordinateRole: 'selected_operating_location',
+    coordinatePolicy: 'direct_coordinate_request_no_snapping',
+    getWave: async () => osfResponse('waveHeight', 1.2),
+    getWind: async () => osfResponse('windSpeed', 2.3),
+    getPfz: async () => {
+      throw Object.assign(new Error('PFZ timeout'), { code: 'PFZ_TIMEOUT' })
+    },
+    getWeather: async () => weatherResponse(),
+    getCyclone: async () => cycloneResponse(),
+  })
+
+  const pfz = result.evidence.find(({ parameter }) => parameter === 'pfz')
+  assert.equal(pfz.status, 'unavailable')
+  assert.equal(pfz.value, null)
+  assert.equal(result.aggregation.missingParameters.includes('pfz'), false)
+  assert.deepEqual(result.aggregation.missingParameters, ['lightningRiskPercent'])
+  assert.equal(result.decision.riskLevel, 'DATA_INSUFFICIENT')
+  assert.equal(result.decision.evidence.some(({ parameter }) => parameter === 'pfz'), true)
+})

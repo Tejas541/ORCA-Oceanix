@@ -5,6 +5,10 @@ import { getMarineParameters } from './incoisService.js'
 import { fetchIncoisWave } from './incoisWaveService.js'
 import { fetchIncoisWind } from './incoisWindService.js'
 import {
+    fetchIncoisPfz,
+    unavailablePfzResult,
+} from './incoisPfzService.js'
+import {
     fetchOpenMeteoForecast,
     OPEN_METEO_LIGHTNING_PARAMETER,
 } from './openMeteoService.js'
@@ -88,6 +92,24 @@ function unavailableOsfEvidence({
       code: error?.code ?? 'INCOIS_OSF_REQUEST_FAILED',
       message: error?.message ?? 'INCOIS OSF request failed',
     },
+  })
+}
+
+function unavailablePfzEvidence({
+                                  latitude,
+                                  longitude,
+                                  coordinateRole,
+                                  coordinatePolicy,
+                                  error,
+                                }) {
+  return unavailablePfzResult(new Date().toISOString(), 'source_unavailable', {
+    code: error?.code ?? 'PFZ_REQUEST_FAILED',
+    message: error?.message ?? 'PFZ request failed',
+  }, {
+    latitude,
+    longitude,
+    coordinateRole,
+    coordinatePolicy,
   })
 }
 
@@ -267,6 +289,7 @@ export async function getIncoisOrcaDecision({
                                                 coordinatePolicy = DEFAULT_COORDINATE_POLICY,
                                                 getWave = fetchIncoisWave,
                                                 getWind = fetchIncoisWind,
+                                                getPfz = fetchIncoisPfz,
                                                 getWeather = fetchOpenMeteoForecast,
                                                 getCyclone = fetchGdacsCyclone,
                                             } = {}) {
@@ -279,10 +302,11 @@ export async function getIncoisOrcaDecision({
         coordinatePolicy,
     }
 
-    const [waveResponse, windResponse, weatherResponse, cycloneResponse] =
+    const [waveResponse, windResponse, pfzResponse, weatherResponse, cycloneResponse] =
         await Promise.allSettled([
             getWave(request),
             getWind(request),
+            getPfz(request),
             getWeather(request),
             getCyclone(request),
         ])
@@ -292,6 +316,17 @@ export async function getIncoisOrcaDecision({
 
     const windResult =
         windResponse.status === 'fulfilled' ? windResponse.value : null
+
+    const pfzResult =
+        pfzResponse.status === 'fulfilled'
+            ? pfzResponse.value
+            : unavailablePfzEvidence({
+                latitude,
+                longitude,
+                coordinateRole,
+                coordinatePolicy,
+                error: pfzResponse.reason,
+            })
 
     const weatherResult =
         weatherResponse.status === 'fulfilled'
@@ -318,6 +353,7 @@ export async function getIncoisOrcaDecision({
       coordinatePolicy,
       error: windResponse.reason,
     })]),
+      ...(pfzResult?.evidence ?? []),
       ...(weatherResult?.evidence ?? [
           unavailableOpenMeteoEvidence({
               parameter: 'visibility',
@@ -351,6 +387,7 @@ export async function getIncoisOrcaDecision({
       provider: 'INCOIS',
       wave: waveResult?.source ?? null,
         wind: windResult?.source ?? null,
+        pfz: pfzResult?.source ?? null,
         weather: weatherResult?.source ?? null,
         cyclone: cycloneResult?.source ?? null,
     },
@@ -364,6 +401,7 @@ export async function getIncoisOrcaDecision({
       coordinatePolicy,
       wave: waveResult?.provenance ?? null,
         wind: windResult?.provenance ?? null,
+        pfz: pfzResult?.provenance ?? null,
         weather: weatherResult?.provenance ?? null,
         cyclone: cycloneResult?.provenance ?? null,
     },
