@@ -514,7 +514,7 @@ export default function GISMap() {
     <div className="h-screen w-full relative bg-slate-50 overflow-hidden font-sans">
       
       {/* 1. Data Sources pane */}
-      <div className={`absolute top-20 bottom-24 left-6 z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
+      <div className={`absolute top-20 bottom-[calc(50%+0.5rem)] left-6 z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
         isSourcesOpen ? 'w-72 p-5' : 'w-12 p-2'
       }`}>
         <div className="flex items-center justify-between mb-4">
@@ -600,7 +600,7 @@ export default function GISMap() {
       </div>
 
       {/* 2. Map Layers pane */}
-      <div className={`absolute top-20 bottom-24 left-[21rem] z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
+      <div className={`absolute top-[calc(50%+0.5rem)] bottom-24 left-6 z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
         isLayersOpen ? 'w-72 p-5' : 'w-12 p-2'
       }`}>
         <div className="flex items-center justify-between mb-4">

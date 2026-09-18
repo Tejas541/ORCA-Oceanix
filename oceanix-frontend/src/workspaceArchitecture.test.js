@@ -90,6 +90,9 @@ test('GIS keeps independent Data Sources and Map Layers panes', () => {
   assert.match(source, /isSourcesOpen/)
   assert.match(source, /isLayersOpen/)
   assert.match(source, /overflow-y-auto/)
+  assert.match(source, /top-20 bottom-\[calc\(50%\+0\.5rem\)\] left-6/)
+  assert.match(source, /top-\[calc\(50%\+0\.5rem\)\] bottom-24 left-6/)
+  assert.doesNotMatch(source, /left-\[21rem\]/)
   for (const layer of ['OFFICIAL_PFZ', 'INCOIS_SST', 'INCOIS_CHL']) {
     assert.match(source, new RegExp(`id: '${layer}'`))
   }
