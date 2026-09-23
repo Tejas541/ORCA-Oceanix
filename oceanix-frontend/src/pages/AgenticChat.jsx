@@ -124,6 +124,7 @@ export default function AgenticChat({ view = 'chat' }) {
   const {
     selectedOperatingLocation,
     locationDecision,
+    assistantTask,
   } = useScenario()
   const decision = locationDecision?.decision ?? {
     riskLevel: 'DATA_INSUFFICIENT',
@@ -398,6 +399,12 @@ export default function AgenticChat({ view = 'chat' }) {
             {decision.riskLevel === 'SAFE_FOR_VENTURE' ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
             {decision.ventureStatusLabel}
           </div>
+
+          {assistantTask && (
+            <div className="glass-panel px-3 py-1 rounded-full border border-blue-100 text-[9px] font-black uppercase tracking-wider text-blue-700">
+              Shared task: {assistantTask.intent} · {assistantTask.status}
+            </div>
+          )}
         </div>
 
         {/* Search Interface */}

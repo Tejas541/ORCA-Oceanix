@@ -1,5 +1,6 @@
 import cors from 'cors'
 import express from 'express'
+import assistantRoutes from './routes/assistantRoutes.js'
 import imdRoutes from './routes/imdRoutes.js'
 import incoisRoutes from './routes/incoisRoutes.js'
 import marineRoutes from './routes/marineRoutes.js'
@@ -20,6 +21,7 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.use('/api/marine', marineRoutes)
+app.use('/api/assistant', assistantRoutes)
 app.use('/api/incois', incoisRoutes)
 app.use('/api/orca', orcaRoutes)
 app.use('/api/imd', imdRoutes)
