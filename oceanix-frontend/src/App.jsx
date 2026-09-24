@@ -7,9 +7,10 @@ import SafetyBarometer from './pages/SafetyBarometer'
 import AgenticChat from './pages/AgenticChat'
 import AdvisoryBulletin from './pages/AdvisoryBulletin'
 import InteractiveMesh from './components/InteractiveMesh'
+import VoiceAssistantPanel from './components/VoiceAssistantPanel'
 
 const Home = () => (
-  <main className="relative min-h-screen flex items-center bg-white overflow-hidden">
+  <main className="relative min-h-screen bg-white overflow-hidden pt-28 pb-24">
     <InteractiveMesh />
     <div className="relative z-10 w-full max-w-7xl mx-auto px-12 md:px-24">
       <motion.div
@@ -36,6 +37,7 @@ const Home = () => (
           </Link>
         </div>
       </motion.div>
+      <VoiceAssistantPanel />
     </div>
     <div className="absolute bottom-10 w-full flex justify-between px-12 md:px-24 text-[10px] font-mono text-slate-400 uppercase tracking-[0.2em]">
       <div>Created by <span className="text-slate-600 font-bold">Team Runtime Terror</span> for ISRO · Smart India Hackathon 2026</div>

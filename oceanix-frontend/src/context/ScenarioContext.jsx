@@ -15,6 +15,8 @@ export function ScenarioProvider({ children }) {
     const [selectedOperatingLocation, setSelectedOperatingLocation] = useState(null)
     const [locationDecision, setLocationDecision] = useState(null)
     const [userCoordinates, setUserCoordinates] = useState(null)
+    const [assistantTask, setAssistantTask] = useState(null)
+    const [assistantConversation, setAssistantConversation] = useState([])
 
     const selectedScenario = useMemo(
         () => getMarineScenario(selectedScenarioId),
@@ -33,6 +35,10 @@ export function ScenarioProvider({ children }) {
             setLocationDecision,
             userCoordinates,
             setUserCoordinates,
+            assistantTask,
+            setAssistantTask,
+            assistantConversation,
+            setAssistantConversation,
             scenarios: marineScenarios,
             defaultScenarioId,
         }),
@@ -42,6 +48,8 @@ export function ScenarioProvider({ children }) {
             selectedOperatingLocation,
             locationDecision,
             userCoordinates,
+            assistantTask,
+            assistantConversation,
         ]
     )
 
