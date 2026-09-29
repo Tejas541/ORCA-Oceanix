@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { MapContainer, TileLayer, WMSTileLayer, Circle, CircleMarker, Polyline, Polygon, Popup, Marker, useMap, useMapEvents } from 'react-leaflet'
-import { Layers, Play, Pause, RotateCcw, MessageSquare, Target, ShieldAlert, Anchor, Send, MapPin, Sparkles, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Layers, Play, Pause, RotateCcw, MessageSquare, Target, ShieldAlert, Anchor, Send, MapPin, Sparkles, X, ChevronLeft, ChevronRight, Navigation } from 'lucide-react'
 import 'leaflet/dist/leaflet.css'
 import { motion, AnimatePresence } from 'framer-motion'
 import L from 'leaflet'
 import { useScenario } from '../context/ScenarioContext'
+import { extractCoordinates } from '../services/marineRouting'
 import {
   createForecastRequestContext,
   fetchIncoisPfz,
@@ -18,6 +19,8 @@ import {
   getNearbyMarineOperatingLocations,
 } from '../utils/marineOperatingLocationUi'
 import { getCanonicalCycloneEvidence, getGdacsCycloneDisplay } from '../utils/gdacsCycloneUi'
+import { getActivityIntelligence, isLayerRelevant } from '../config/activityIntelligence'
+import AivanaVoiceInterface from '../components/AivanaVoiceInterface'
 
 const trawlerIcon = new L.Icon({
   iconUrl: 'https://cdn-icons-png.flaticon.com/512/2942/2942940.png',
@@ -43,7 +46,7 @@ function geoJsonLinePositions(feature) {
   }
   if (geometry?.type === 'MultiLineString') {
     return geometry.coordinates.map((line) =>
-        line.map(([longitude, latitude]) => [latitude, longitude])
+      line.map(([longitude, latitude]) => [latitude, longitude])
     )
   }
   return []
@@ -68,8 +71,8 @@ function haversineNm(a, b) {
   const lat1 = toRad(a[0])
   const lat2 = toRad(b[0])
   const h =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
   return 2 * EARTH_RADIUS_NM * Math.asin(Math.min(1, Math.sqrt(h)))
 }
 
@@ -79,14 +82,14 @@ function destinationPoint(lat, lng, bearingDeg, distNm) {
   const lon1 = toRad(lng)
   const ang = distNm / EARTH_RADIUS_NM
   const lat2 = Math.asin(
-      Math.sin(lat1) * Math.cos(ang) + Math.cos(lat1) * Math.sin(ang) * Math.cos(brng)
+    Math.sin(lat1) * Math.cos(ang) + Math.cos(lat1) * Math.sin(ang) * Math.cos(brng)
   )
   const lon2 =
-      lon1 +
-      Math.atan2(
-          Math.sin(brng) * Math.sin(ang) * Math.cos(lat1),
-          Math.cos(ang) - Math.sin(lat1) * Math.sin(lat2)
-      )
+    lon1 +
+    Math.atan2(
+      Math.sin(brng) * Math.sin(ang) * Math.cos(lat1),
+      Math.cos(ang) - Math.sin(lat1) * Math.sin(lat2)
+    )
   return [toDeg(lat2), toDeg(lon2)]
 }
 
@@ -148,25 +151,26 @@ function MapOperatingLocationView({ userCoordinates, selectedOperatingLocation }
   const map = useMap()
 
   useEffect(() => {
-    if (!userCoordinates) return
-
-    if (!selectedOperatingLocation) {
+    if (userCoordinates && selectedOperatingLocation) {
+      const connection = getOperatingLocationConnection(
+        userCoordinates,
+        selectedOperatingLocation
+      )
+      map.fitBounds(connection, {
+        padding: [80, 120],
+        maxZoom: 11,
+        animate: true,
+        duration: 0.8,
+      })
+    } else if (selectedOperatingLocation) {
+      map.flyTo([selectedOperatingLocation.latitude, selectedOperatingLocation.longitude], 11, {
+        duration: 0.8,
+      })
+    } else if (userCoordinates) {
       map.flyTo([userCoordinates.latitude, userCoordinates.longitude], 11, {
         duration: 0.8,
       })
-      return
     }
-
-    const connection = getOperatingLocationConnection(
-        userCoordinates,
-        selectedOperatingLocation
-    )
-    map.fitBounds(connection, {
-      padding: [80, 120],
-      maxZoom: 11,
-      animate: true,
-      duration: 0.8,
-    })
   }, [map, userCoordinates, selectedOperatingLocation])
 
   return null
@@ -190,12 +194,12 @@ export default function GISMap() {
     setLocationDecision,
     userCoordinates: contextUserCoordinates,
     setUserCoordinates: setContextUserCoordinates,
+    activityContext,
+    routePlan,
+    clearRoutePlan,
+    officialPfz: contextOfficialPfz,
+    setOfficialPfz: setContextOfficialPfz,
   } = useScenario()
-
-  // Browser GPS is shared through ScenarioContext.
-  // It is only a discovery aid; selectedOperatingLocation remains
-  // the authoritative operating location for ORCA.
-  const userCoordinates = contextUserCoordinates
 
   const route = scenario.trawlerRoute.coordinates
   const imblLine = scenario.imbl.coordinates
@@ -216,31 +220,41 @@ export default function GISMap() {
   const [boatPosition, setBoatPosition] = useState(route[0])
   const [routeIndex, setRouteIndex] = useState(0)
   const [notifications, setNotifications] = useState([])
-  const [officialPfz, setOfficialPfz] = useState(null)
-  const [locationStatus, setLocationStatus] = useState('loading')
+  const [localOfficialPfz, setLocalOfficialPfz] = useState(null)
+  const officialPfz = contextOfficialPfz ?? localOfficialPfz
+  const setOfficialPfz = setContextOfficialPfz ?? setLocalOfficialPfz
+  const [locationStatus, setLocationStatus] = useState(
+    contextUserCoordinates ? 'available' : (selectedOperatingLocation ? 'idle' : 'loading')
+  )
   const [locationError, setLocationError] = useState('')
+  const [userCoordinates, setUserCoordinates] = useState(contextUserCoordinates || null)
   const [isOperatingLocationOpen, setIsOperatingLocationOpen] = useState(false)
-  const [isAssistantOpen, setIsAssistantOpen] = useState(false)
   const [isSourcesOpen, setIsSourcesOpen] = useState(true)
   const [isLayersOpen, setIsLayersOpen] = useState(true)
   const [clickedLocation, setClickedLocation] = useState(null)
-  const [chatInput, setChatInput] = useState('')
-  const [chatMessages, setChatMessages] = useState([
-    {
-      id: 1,
-      sender: 'assistant',
-      text: 'Select an operating location to load location-specific canonical evidence.',
-      time: 'Just now',
-    },
-  ])
+
+  const activityIntelligence = useMemo(
+    () => getActivityIntelligence(activityContext?.activity),
+    [activityContext?.activity]
+  )
+
+  useEffect(() => {
+    if (activityContext?.activity) {
+      setActiveLayers(activityIntelligence.relevantLayers)
+    }
+  }, [activityContext?.activity, activityIntelligence])
 
   const requestLocation = useCallback(async () => {
     setLocationStatus('loading')
     setLocationError('')
+    setIsOperatingLocationOpen(false)
 
     try {
       const coordinates = await requestBrowserLocation()
-      setContextUserCoordinates(coordinates)
+      setUserCoordinates(coordinates)
+      if (setContextUserCoordinates) {
+        setContextUserCoordinates(coordinates)
+      }
       setLocationStatus('available')
     } catch (error) {
       setLocationStatus('error')
@@ -252,70 +266,54 @@ export default function GISMap() {
     if (!contextUserCoordinates && !selectedOperatingLocation) {
       requestLocation()
     }
-  }, [
-    contextUserCoordinates,
-    selectedOperatingLocation,
-    requestLocation,
-  ])
+  }, [contextUserCoordinates, selectedOperatingLocation, requestLocation])
 
   const mapCenter = useMemo(() => {
     if (selectedOperatingLocation) {
-      return [
-        selectedOperatingLocation.latitude,
-        selectedOperatingLocation.longitude,
-      ]
+      return [selectedOperatingLocation.latitude, selectedOperatingLocation.longitude]
     }
-
     if (userCoordinates) {
-      return [
-        userCoordinates.latitude,
-        userCoordinates.longitude,
-      ]
+      return [userCoordinates.latitude, userCoordinates.longitude]
     }
-
     return null
   }, [selectedOperatingLocation, userCoordinates])
 
   const nearbyOperatingLocations = useMemo(
-      () => getNearbyMarineOperatingLocations(userCoordinates, MARINE_OPERATING_LOCATIONS),
-      [userCoordinates]
+    () => getNearbyMarineOperatingLocations(userCoordinates, MARINE_OPERATING_LOCATIONS),
+    [userCoordinates]
   )
-
   const selectedOperatingLocationDistance = selectedOperatingLocation
-      ? nearbyOperatingLocations.find(
-          ({ location }) => location.id === selectedOperatingLocation.id
-      )?.distanceKm
-      : null
-
+    ? nearbyOperatingLocations.find(
+      ({ location }) => location.id === selectedOperatingLocation.id
+    )?.distanceKm
+    : null
   const operatingLocationConnection = getOperatingLocationConnection(
-      userCoordinates,
-      selectedOperatingLocation
+    userCoordinates,
+    selectedOperatingLocation
   )
-
   const forecastRequestContext = useMemo(
-      () => createForecastRequestContext({ userCoordinates, selectedOperatingLocation }),
-      [userCoordinates, selectedOperatingLocation]
+    () => createForecastRequestContext({ userCoordinates, selectedOperatingLocation }),
+    [userCoordinates, selectedOperatingLocation]
   )
 
   useEffect(() => {
     let active = true
-
     fetchIncoisPfz()
-        .then((result) => {
-          if (active) setOfficialPfz(result)
-        })
-        .catch(() => {
-          if (active) {
-            setOfficialPfz({
-              status: 'unavailable',
-              isLive: false,
-              source: { provider: 'INCOIS' },
-              provenance: { provider: 'INCOIS' },
-              reason: 'source_unavailable',
-              data: null,
-            })
-          }
-        })
+      .then((result) => {
+        if (active) setOfficialPfz(result)
+      })
+      .catch(() => {
+        if (active) {
+          setOfficialPfz({
+            status: 'unavailable',
+            isLive: false,
+            source: { provider: 'INCOIS' },
+            provenance: { provider: 'INCOIS' },
+            reason: 'source_unavailable',
+            data: null,
+          })
+        }
+      })
 
     return () => {
       active = false
@@ -324,75 +322,59 @@ export default function GISMap() {
 
   useEffect(() => {
     let active = true
-
-    // GPS is optional. A selected operating location is
-    // sufficient to request location-specific ORCA evidence.
-    if (!selectedOperatingLocation && !userCoordinates) {
-      return undefined
-    }
+    const activeCoordinates = forecastRequestContext?.coordinates
+    if (!activeCoordinates) return undefined
 
     const requestContext = forecastRequestContext
-
     fetchIncoisOrcaDecision({ requestContext })
-        .then((result) => {
-          if (active) setLocationDecision(result)
-        })
-        .catch(() => {
-          if (active) setLocationDecision(null)
-        })
+      .then((result) => {
+        if (active) setLocationDecision(result)
+      })
+      .catch(() => {
+        if (active) setLocationDecision(null)
+      })
 
     return () => {
       active = false
     }
-  }, [
-    selectedOperatingLocation,
-    userCoordinates,
-    forecastRequestContext,
-    setLocationDecision,
-  ])
+  }, [forecastRequestContext, setLocationDecision])
 
   const officialVisibilityEvidence = useMemo(
-      () => locationDecision?.evidence?.find(
-          (record) => record.parameter === 'visibility' && record.status === 'available'
-      ) ?? null,
-      [locationDecision]
+    () => locationDecision?.evidence?.find(
+      (record) => record.parameter === 'visibility' && record.status === 'available'
+    ) ?? null,
+    [locationDecision]
   )
-
   const canonicalWaveEvidence = useMemo(
-      () => locationDecision?.evidence?.find(
-          (record) => record.parameter === 'waveHeight' && record.status === 'available'
-      ) ?? null,
-      [locationDecision]
+    () => locationDecision?.evidence?.find(
+      (record) => record.parameter === 'waveHeight' && record.status === 'available'
+    ) ?? null,
+    [locationDecision]
   )
-
   const canonicalWindEvidence = useMemo(
-      () => locationDecision?.evidence?.find(
-          (record) => record.parameter === 'windSpeed' && record.status === 'available'
-      ) ?? null,
-      [locationDecision]
+    () => locationDecision?.evidence?.find(
+      (record) => record.parameter === 'windSpeed' && record.status === 'available'
+    ) ?? null,
+    [locationDecision]
   )
-
   const gdacsCycloneEvidence = useMemo(
-      () => getCanonicalCycloneEvidence(locationDecision),
-      [locationDecision]
+    () => getCanonicalCycloneEvidence(locationDecision),
+    [locationDecision]
   )
-
   const gdacsCycloneDisplay = useMemo(
-      () => getGdacsCycloneDisplay(gdacsCycloneEvidence),
-      [gdacsCycloneEvidence]
+    () => getGdacsCycloneDisplay(gdacsCycloneEvidence),
+    [gdacsCycloneEvidence]
   )
 
   const officialPfzLines = useMemo(() => {
     if (officialPfz?.status !== 'available') return []
-
     return officialPfz.data.features.flatMap((feature) =>
-        geoJsonLinePositions(feature)
+      geoJsonLinePositions(feature)
     )
   }, [officialPfz])
 
-  const chatEndRef = useRef(null)
-  const chatScrollRef = useRef(null)
   const timerRef = useRef(null)
+  const [isAivanaOpen, setIsAivanaOpen] = useState(false)
 
   // Reset simulation state when the legacy simulated scenario changes.
   useEffect(() => {
@@ -403,32 +385,11 @@ export default function GISMap() {
     setRouteIndex(0)
     setNotifications([])
     setClickedLocation(null)
-    setChatMessages([
-      {
-        id: Date.now(),
-        sender: 'assistant',
-        text: selectedOperatingLocation
-            ? `Current operating location: ${selectedOperatingLocation.name}. Canonical evidence is loading or unavailable.`
-            : 'Select an operating location to load location-specific canonical evidence.',
-        time: 'Just now',
-      },
-    ])
   }, [scenario])
 
-  useEffect(() => {
-    const chatScrollContainer = chatScrollRef.current
-
-    if (chatScrollContainer) {
-      chatScrollContainer.scrollTo({
-        top: chatScrollContainer.scrollHeight,
-        behavior: 'smooth',
-      })
-    }
-  }, [chatMessages])
-
   const liveImblNm = isSimulating
-      ? distanceToPolylineNm(boatPosition, imblLine)
-      : scenario.imbl.distanceFromHarbourNm
+    ? distanceToPolylineNm(boatPosition, imblLine)
+    : scenario.imbl.distanceFromHarbourNm
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -440,7 +401,6 @@ export default function GISMap() {
   const triggerGeofence = () => {
     clearTimer()
     setIsAnimating(false)
-
     setNotifications([
       {
         id: Date.now(),
@@ -477,7 +437,6 @@ export default function GISMap() {
     if (!isAnimating || !isSimulating) return undefined
 
     const distNm = distanceToPolylineNm(boatPosition, imblLine)
-
     if (distNm <= bufferNm) {
       triggerGeofence()
       return undefined
@@ -499,1236 +458,1077 @@ export default function GISMap() {
 
   useEffect(() => () => clearTimer(), [])
 
-  // Helper for generating dynamic AI chat responses grounded in active scenario
-  const handleUserQuery = useCallback((queryText) => {
-    if (!queryText.trim()) return
-
-    const userMsg = {
-      id: Date.now(),
-      sender: 'user',
-      text: queryText,
-      time: new Date().toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    }
-
-    let responseText = ''
-    const q = queryText.toLowerCase()
-
-    if (
-        q.includes('safety') ||
-        q.includes('score') ||
-        q.includes('venture') ||
-        q.includes('risk')
-    ) {
-      responseText = locationDecision?.decision
-          ? `Location-specific ORCA decision: ${locationDecision.decision.safetyScore == null ? 'DATA_INSUFFICIENT' : `${locationDecision.decision.safetyScore}/100`} (${locationDecision.decision.riskLevel}). Status: ${locationDecision.decision.ventureStatusLabel}. Directive: ${locationDecision.decision.officialDirective}`
-          : 'Location-specific safety decision is unavailable until usable marine evidence is available.'
-    } else {
-      responseText = selectedOperatingLocation
-          ? `Current operating location: ${selectedOperatingLocation.name}. Location-specific evidence is available only from the canonical sources shown in the Data Sources panel.`
-          : 'Select an operating location to begin.'
-    }
-
-    const aiMsg = {
-      id: Date.now() + 1,
-      sender: 'assistant',
-      text: responseText,
-      time: new Date().toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    }
-
-    setChatMessages((prev) => [...prev, userMsg, aiMsg])
-    setChatInput('')
-  }, [selectedOperatingLocation, locationDecision])
-
   // Handle map click inspection
   const handleMapClick = useCallback((coords) => {
-    if (!userCoordinates) return
-
     setClickedLocation(coords)
-
-    const distUser = haversineNm(
-        coords,
-        [userCoordinates.latitude, userCoordinates.longitude]
-    )
-
-    const locMsgText = `Inspecting Location [${coords[0].toFixed(4)}°N, ${coords[1].toFixed(4)}°E]: ${distUser.toFixed(1)} NM from Your Location. Location-specific IMBL evidence is unavailable.`
-
-    const userMsg = {
-      id: Date.now(),
-      sender: 'user',
-      text: `📍 Clicked Map: [${coords[0].toFixed(4)}°N, ${coords[1].toFixed(4)}°E]`,
-      time: new Date().toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    }
-
-    const aiMsg = {
-      id: Date.now() + 1,
-      sender: 'assistant',
-      text: locMsgText,
-      time: new Date().toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    }
-
-    setChatMessages((prev) => [...prev, userMsg, aiMsg])
-  }, [userCoordinates])
+  }, [])
 
   return (
-      <div className="h-screen w-full relative bg-slate-50 overflow-hidden font-sans">
+    <div className="h-screen w-full relative bg-slate-50 overflow-hidden font-sans">
 
-        {/* 1. Data Sources pane */}
-        <div className={`absolute top-20 bottom-[calc(50%+0.5rem)] left-6 z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
-            isSourcesOpen ? 'w-72 p-5' : 'w-12 p-2'
-        }`}>
-          <div className="flex items-center justify-between mb-4">
-            {isSourcesOpen && (
-                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                  <Layers size={14} /> Data Sources
-                </h3>
-            )}
-
-            <button
-                onClick={() => setIsSourcesOpen((open) => !open)}
-                className="ml-auto p-1 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                aria-label={isSourcesOpen ? 'Collapse data sources' : 'Expand data sources'}
-                title={isSourcesOpen ? 'Collapse data sources' : 'Expand data sources'}
-            >
-              {isSourcesOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
-            </button>
-          </div>
-
-          {isSourcesOpen ? (
-              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-                <div className="mb-4 text-[9px] leading-relaxed text-violet-700 bg-violet-50 border border-violet-100 px-2.5 py-2 rounded-lg">
-                  <div className="font-black uppercase tracking-widest">
-                    INCOIS Wave Forecast
-                  </div>
-
-                  <div className="mt-1">
-                    {canonicalWaveEvidence
-                        ? `${formatOfficialForecastValue(canonicalWaveEvidence.value)} ${canonicalWaveEvidence.unit ?? 'm'} forecast for ${canonicalWaveEvidence.forecastTime ?? 'time unavailable'}.`
-                        : 'Unavailable for selected location'}
-                  </div>
-
-                  <div className="mt-1 text-violet-600">
-                    Source: {canonicalWaveEvidence?.provider ?? 'INCOIS'}
-                  </div>
-                </div>
-
-                <div className="mb-4 text-[9px] leading-relaxed text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-2 rounded-lg">
-                  <div className="font-black uppercase tracking-widest">
-                    INCOIS Wind Forecast
-                  </div>
-
-                  <div className="mt-1">
-                    {canonicalWindEvidence
-                        ? `${formatOfficialForecastValue(canonicalWindEvidence.value)} ${canonicalWindEvidence.unit ?? 'm/s'} forecast for ${canonicalWindEvidence.forecastTime ?? 'time unavailable'}.`
-                        : 'Unavailable for selected location'}
-                  </div>
-
-                  <div className="mt-1 text-indigo-600">
-                    Source: {canonicalWindEvidence?.provider ?? 'INCOIS'}
-                  </div>
-                </div>
-
-                <div className="mb-4 text-[9px] leading-relaxed text-cyan-700 bg-cyan-50 border border-cyan-100 px-2.5 py-2 rounded-lg">
-                  <div className="font-black uppercase tracking-widest">
-                    Open-Meteo Visibility
-                  </div>
-
-                  <div className="mt-1">
-                    {officialVisibilityEvidence
-                        ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)} ${officialVisibilityEvidence.unit ?? 'm'} forecast for ${officialVisibilityEvidence.forecastTime ?? 'time unavailable'}.`
-                        : 'Unavailable for selected location'}
-                  </div>
-
-                  <div className="mt-1 text-cyan-600">
-                    Forecast • not live observation · Source: {officialVisibilityEvidence?.provider ?? 'Open-Meteo'}
-                  </div>
-                </div>
-
-                <div className="mb-4 text-[9px] leading-relaxed text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-2 rounded-lg">
-                  <div className="font-black uppercase tracking-widest">
-                    {gdacsCycloneDisplay.title}
-                  </div>
-
-                  <div className="mt-1">
-                    {gdacsCycloneDisplay.state === 'active'
-                        ? gdacsCycloneDisplay.eventName ?? gdacsCycloneDisplay.category
-                        : gdacsCycloneDisplay.message}
-                  </div>
-
-                  {gdacsCycloneDisplay.state === 'active' &&
-                      gdacsCycloneDisplay.eventName &&
-                      gdacsCycloneDisplay.category && (
-                          <div className="mt-1">
-                            Category: {gdacsCycloneDisplay.category}
-                          </div>
-                      )}
-
-                  <div className="mt-1 text-blue-600">
-                    {gdacsCycloneDisplay.provider
-                        ? `Source: ${gdacsCycloneDisplay.provider}`
-                        : 'Source: GDACS'}
-                    {gdacsCycloneDisplay.status
-                        ? ` · ${gdacsCycloneDisplay.status} • Runtime`
-                        : ''}
-                  </div>
-                </div>
-
-                <div className="mb-4 text-[9px] leading-relaxed text-slate-600 bg-slate-50 border border-slate-100 px-2.5 py-2 rounded-lg">
-                  <div className="font-black uppercase tracking-widest">
-                    Lightning Risk Percentage
-                  </div>
-                  <div className="mt-1">
-                    Unavailable for selected location
-                  </div>
-                </div>
-              </div>
-          ) : null}
+      {/* 1. Data Sources pane */}
+      <div className={`absolute top-20 bottom-[calc(50%+0.5rem)] left-6 z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
+        isSourcesOpen ? 'w-72 p-5' : 'w-12 p-2'
+      }`}>
+        <div className="flex items-center justify-between mb-4">
+          {isSourcesOpen && (
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+              <Layers size={14} /> Data Sources
+            </h3>
+          )}
+          <button
+            onClick={() => setIsSourcesOpen((open) => !open)}
+            className="ml-auto p-1 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+            aria-label={isSourcesOpen ? 'Collapse data sources' : 'Expand data sources'}
+            title={isSourcesOpen ? 'Collapse data sources' : 'Expand data sources'}
+          >
+            {isSourcesOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+          </button>
         </div>
 
-        {/* 2. Map Layers pane */}
-        <div className={`absolute top-[calc(50%+0.5rem)] bottom-24 left-6 z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
-            isLayersOpen ? 'w-72 p-5' : 'w-12 p-2'
-        }`}>
-          <div className="flex items-center justify-between mb-4">
-            {isLayersOpen && (
-                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                  <Layers size={14} /> Map Layers
-                </h3>
-            )}
-
-            <button
-                onClick={() => setIsLayersOpen((open) => !open)}
-                className="ml-auto p-1 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                aria-label={isLayersOpen ? 'Collapse map layers' : 'Expand map layers'}
-                title={isLayersOpen ? 'Collapse map layers' : 'Expand map layers'}
-            >
-              {isLayersOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
-            </button>
+        {isSourcesOpen ? <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+          <div className="mb-4 text-[9px] leading-relaxed text-violet-700 bg-violet-50 border border-violet-100 px-2.5 py-2 rounded-lg">
+            <div className="font-black uppercase tracking-widest">
+                INCOIS Wave Forecast
+            </div>
+            <div className="mt-1">
+                {canonicalWaveEvidence
+                  ? `${formatOfficialForecastValue(canonicalWaveEvidence.value)} ${canonicalWaveEvidence.unit ?? 'm'} forecast for ${canonicalWaveEvidence.forecastTime ?? 'time unavailable'}.`
+                  : 'Unavailable for selected location'}
+            </div>
+            <div className="mt-1 text-violet-600">
+                Source: {canonicalWaveEvidence?.provider ?? 'INCOIS'}
+            </div>
           </div>
 
-          {isLayersOpen ? (
-              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-                <div className="space-y-2">
-                  {[
-                    {
-                      id: 'PFZ',
-                      label: 'Simulated PFZ Fishing Zones',
-                      color: 'bg-emerald-500',
-                      icon: <Target size={14} />,
-                    },
-                    {
-                      id: 'OFFICIAL_PFZ',
-                      label: 'Official INCOIS PFZ Geometry',
-                      color: 'bg-violet-500',
-                      icon: <Target size={14} />,
-                    },
-                    {
-                      id: 'INCOIS_SST',
-                      label: 'Official INCOIS WMS — SST',
-                      color: 'bg-cyan-500',
-                      icon: <Layers size={14} />,
-                    },
-                    {
-                      id: 'INCOIS_CHL',
-                      label: 'Official INCOIS WMS — Chlorophyll',
-                      color: 'bg-sky-500',
-                      icon: <Layers size={14} />,
-                    },
-                    {
-                      id: 'IMBL',
-                      label: 'Simulated IMBL Border Buffer',
-                      color: 'bg-rose-500',
-                      icon: <ShieldAlert size={14} />,
-                    },
-                    {
-                      id: 'MPA',
-                      label: 'Simulated MPA Eco Reserves',
-                      color: 'bg-orange-400',
-                      icon: <Anchor size={14} />,
-                    },
-                    {
-                      id: 'CYCLONE',
-                      label: 'Simulated Cyclone Track',
-                      color: 'bg-blue-600',
-                      icon: <Layers size={14} />,
-                    },
-                  ].map((layer) => (
-                      <button
-                          key={layer.id}
-                          onClick={() =>
-                              setActiveLayers((prev) =>
-                                  prev.includes(layer.id)
-                                      ? prev.filter((i) => i !== layer.id)
-                                      : [...prev, layer.id]
-                              )
-                          }
-                          className={`w-full flex items-center justify-between p-2.5 rounded-xl transition-all border ${
-                              activeLayers.includes(layer.id)
-                                  ? 'bg-white border-slate-200 shadow-sm'
-                                  : 'bg-transparent border-transparent opacity-50'
-                          }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`w-2 h-2 rounded-full ${layer.color}`} />
-                          <span className="text-xs font-bold text-slate-700">
-                      {layer.label}
-                    </span>
-                        </div>
-                        <div className="text-slate-400">{layer.icon}</div>
-                      </button>
-                  ))}
-                </div>
+          <div className="mb-4 text-[9px] leading-relaxed text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-2 rounded-lg">
+            <div className="font-black uppercase tracking-widest">
+                INCOIS Wind Forecast
+            </div>
+            <div className="mt-1">
+                {canonicalWindEvidence
+                  ? `${formatOfficialForecastValue(canonicalWindEvidence.value)} ${canonicalWindEvidence.unit ?? 'm/s'} forecast for ${canonicalWindEvidence.forecastTime ?? 'time unavailable'}.`
+                  : 'Unavailable for selected location'}
+            </div>
+            <div className="mt-1 text-indigo-600">
+                Source: {canonicalWindEvidence?.provider ?? 'INCOIS'}
+            </div>
+          </div>
 
-                <div className="mt-6 pt-4 border-t border-slate-200/60">
-                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
-                    <span>Simulated Trawler Route</span>
-                    <span className="text-slate-500 font-mono">
-                  {scenario.trawlerRoute.vesselId}
-                </span>
-                  </div>
+          <div className="mb-4 text-[9px] leading-relaxed text-cyan-700 bg-cyan-50 border border-cyan-100 px-2.5 py-2 rounded-lg">
+            <div className="font-black uppercase tracking-widest">
+                Open-Meteo Visibility
+            </div>
+            <div className="mt-1">
+                {officialVisibilityEvidence
+                  ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)} ${officialVisibilityEvidence.unit ?? 'm'} forecast for ${officialVisibilityEvidence.forecastTime ?? 'time unavailable'}.`
+                  : 'Unavailable for selected location'}
+            </div>
+            <div className="mt-1 text-cyan-600">
+                Forecast • not live observation · Source: {officialVisibilityEvidence?.provider ?? 'Open-Meteo'}
+            </div>
+          </div>
 
-                  {!isSimulating ? (
-                      <button
-                          onClick={triggerSimulation}
-                          className="w-full bg-slate-900 text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-md active:scale-98"
-                      >
-                        <Play size={13} fill="white" /> Start Trawler Route
-                      </button>
-                  ) : (
-                      <div className="flex gap-2">
-                        {isAnimating ? (
-                            <button
-                                onClick={pauseSimulation}
-                                className="flex-1 bg-amber-500 text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-amber-600 transition-all"
-                            >
-                              <Pause size={13} /> Pause
-                            </button>
-                        ) : (
-                            <button
-                                onClick={() => setIsAnimating(true)}
-                                className="flex-1 bg-emerald-600 text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-emerald-700 transition-all"
-                            >
-                              <Play size={13} fill="white" /> Resume
-                            </button>
-                        )}
+          <div className="mb-4 text-[9px] leading-relaxed text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-2 rounded-lg">
+            <div className="font-black uppercase tracking-widest">{gdacsCycloneDisplay.title}</div>
+            <div className="mt-1">
+              {gdacsCycloneDisplay.state === 'active'
+                ? gdacsCycloneDisplay.eventName ?? gdacsCycloneDisplay.category
+                : gdacsCycloneDisplay.message}
+            </div>
+            {gdacsCycloneDisplay.state === 'active' && gdacsCycloneDisplay.eventName && gdacsCycloneDisplay.category && (
+              <div className="mt-1">Category: {gdacsCycloneDisplay.category}</div>
+            )}
+            <div className="mt-1 text-blue-600">
+              {gdacsCycloneDisplay.provider ? `Source: ${gdacsCycloneDisplay.provider}` : 'Source: GDACS'}
+              {gdacsCycloneDisplay.status ? ` · ${gdacsCycloneDisplay.status} • Runtime` : ''}
+            </div>
+          </div>
 
-                        <button
-                            onClick={resetSimulation}
-                            className="bg-slate-200 text-slate-700 p-2 rounded-xl hover:bg-slate-300 transition-all"
-                            title="Reset Route"
-                        >
-                          <RotateCcw size={14} />
-                        </button>
-                      </div>
-                  )}
-                </div>
-              </div>
-          ) : null}
+          <div className="mb-4 text-[9px] leading-relaxed text-slate-600 bg-slate-50 border border-slate-100 px-2.5 py-2 rounded-lg">
+            <div className="font-black uppercase tracking-widest">Lightning Risk Percentage</div>
+            <div className="mt-1">Unavailable for selected location</div>
+          </div>
+        </div> : null}
+      </div>
+
+      {/* 2. Map Layers pane */}
+      <div className={`absolute top-[calc(50%+0.5rem)] bottom-24 left-6 z-[1000] glass-panel rounded-3xl shadow-2xl border border-white/50 flex flex-col min-h-0 transition-all duration-200 ${
+        isLayersOpen ? 'w-72 p-5' : 'w-12 p-2'
+      }`}>
+        <div className="flex items-center justify-between mb-4">
+          {isLayersOpen && (
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+              <Layers size={14} /> Map Layers
+            </h3>
+          )}
+          <button
+            onClick={() => setIsLayersOpen((open) => !open)}
+            className="ml-auto p-1 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+            aria-label={isLayersOpen ? 'Collapse map layers' : 'Expand map layers'}
+            title={isLayersOpen ? 'Collapse map layers' : 'Expand map layers'}
+          >
+            {isLayersOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+          </button>
         </div>
 
-        {/* 2. Floating AI Assistant */}
-        {isAssistantOpen ? (
-            <div className="absolute z-[1100] right-4 bottom-24 w-[min(24rem,calc(100vw-2rem))] h-[min(70vh,38rem)] max-h-[calc(100vh-6rem)] glass-panel rounded-[2rem] shadow-2xl border border-white/50 flex flex-col min-h-0 overflow-hidden">
-              <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white/70 backdrop-blur-md shrink-0">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" />
-                  <span className="font-bold text-sm text-slate-800 tracking-tight flex items-center gap-1.5">
-                Blue Orbit Assistant
-                <Sparkles size={14} className="text-blue-500" />
-              </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-              <span className="text-[9px] font-bold bg-slate-900 text-white px-2 py-1 rounded-md">
-                SIMULATED ASSISTANT
-              </span>
-
-                  <button
-                      onClick={() => setIsAssistantOpen(false)}
-                      className="p-1 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                      aria-label="Close AI assistant"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-              </div>
-
-              <div
-                  ref={chatScrollRef}
-                  className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 text-xs font-medium"
-              >
-                {chatMessages.map((msg) => (
-                    <div
-                        key={msg.id}
-                        className={`flex flex-col ${
-                            msg.sender === 'user' ? 'items-end' : 'items-start'
-                        }`}
-                    >
-                      <div
-                          className={`max-w-[85%] p-3.5 rounded-2xl shadow-sm leading-relaxed ${
-                              msg.sender === 'user'
-                                  ? 'bg-slate-900 text-white rounded-br-none'
-                                  : 'bg-white text-slate-700 border border-slate-100 rounded-bl-none'
-                          }`}
-                      >
-                        {msg.text}
-                      </div>
-
-                      <span className="text-[9px] font-mono text-slate-400 mt-1 px-1">
-                  {msg.time}
-                </span>
-                    </div>
-                ))}
-
-                <div ref={chatEndRef} />
-              </div>
-
-              <div className="p-3 bg-white/90 border-t border-slate-100 shrink-0">
-                <form
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      handleUserQuery(chatInput)
-                    }}
-                    className="relative"
+        {isLayersOpen ? <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+          <div className="space-y-2">
+            {[
+                { id: 'PFZ', label: 'Simulated PFZ Fishing Zones', color: 'bg-emerald-500', icon: <Target size={14}/> },
+                { id: 'OFFICIAL_PFZ', label: 'Official INCOIS PFZ Geometry', color: 'bg-violet-500', icon: <Target size={14}/> },
+                { id: 'INCOIS_SST', label: 'Official INCOIS WMS — SST', color: 'bg-cyan-500', icon: <Layers size={14}/> },
+                { id: 'INCOIS_CHL', label: 'Official INCOIS WMS — Chlorophyll', color: 'bg-sky-500', icon: <Layers size={14}/> },
+                { id: 'IMBL', label: 'Simulated IMBL Border Buffer', color: 'bg-rose-500', icon: <ShieldAlert size={14}/> },
+                { id: 'MPA', label: 'Simulated MPA Eco Reserves', color: 'bg-orange-400', icon: <Anchor size={14}/> },
+                { id: 'CYCLONE', label: 'Simulated Cyclone Track', color: 'bg-blue-600', icon: <Layers size={14}/> },
+            ].map((layer) => {
+                const isRelevant = isLayerRelevant(activityContext?.activity, layer.id)
+                return (
+                <button
+                  key={layer.id}
+                  onClick={() => setActiveLayers(prev => prev.includes(layer.id) ? prev.filter(i => i !== layer.id) : [...prev, layer.id])}
+                  className={`w-full flex items-center justify-between p-2.5 rounded-xl transition-all border ${activeLayers.includes(layer.id) ? 'bg-white border-slate-200 shadow-sm' : 'bg-transparent border-transparent opacity-50'}`}
                 >
-                  <input
-                      className="w-full bg-slate-100 border-none rounded-2xl pl-4 pr-11 py-3 text-xs outline-none focus:ring-2 ring-blue-500/20 text-slate-800 placeholder-slate-400"
-                      placeholder="Ask AI about PFZ, wave risk, IMBL..."
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                  />
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${layer.color}`} />
+                    <span className="text-xs font-bold text-slate-700">{layer.label}</span>
+                    {activityContext?.activity && isRelevant && (
+                      <span className="text-[8px] font-black uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-slate-400">{layer.icon}</div>
+                </button>
+                )
+            })}
+          </div>
 
-                  <button
-                      type="submit"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 bg-slate-900 rounded-xl flex items-center justify-center text-white hover:bg-black transition-all"
-                  >
-                    <Send size={12} />
-                  </button>
-                </form>
-              </div>
+          <div className="mt-6 pt-4 border-t border-slate-200/60">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
+              <span>Simulated Trawler Route</span>
+              <span className="text-slate-500 font-mono">{scenario.trawlerRoute.vesselId}</span>
             </div>
-        ) : (
-            <button
-                onClick={() => setIsAssistantOpen(true)}
-                className="absolute right-4 bottom-6 z-[1100] bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl border border-white/40 flex items-center gap-2 hover:bg-black transition-all"
-                aria-label="Open AI assistant"
-            >
-              <MessageSquare size={16} />
-              <span className="text-xs font-black">AI Assistant</span>
-            </button>
+            {!isSimulating ? (
+              <button onClick={triggerSimulation} className="w-full bg-slate-900 text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-md active:scale-98">
+                <Play size={13} fill="white" /> Start Trawler Route
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                {isAnimating ? (
+                  <button onClick={pauseSimulation} className="flex-1 bg-amber-500 text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-amber-600 transition-all">
+                    <Pause size={13} /> Pause
+                  </button>
+                ) : (
+                  <button onClick={() => setIsAnimating(true)} className="flex-1 bg-emerald-600 text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-emerald-700 transition-all">
+                    <Play size={13} fill="white" /> Resume
+                  </button>
+                )}
+                <button onClick={resetSimulation} className="bg-slate-200 text-slate-700 p-2 rounded-xl hover:bg-slate-300 transition-all" title="Reset Route">
+                  <RotateCcw size={14} />
+                </button>
+              </div>
+            )}
+          </div>
+        </div> : null}
+      </div>
+
+      {/* 3. Bottom Stats Bar */}
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[1000] glass-panel px-6 py-3 rounded-2xl flex gap-6 items-center border border-white/50 shadow-xl max-w-2xl overflow-x-auto">
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-slate-400 uppercase">Wave Height</span>
+          <span className="text-xs font-black text-slate-800">
+            {canonicalWaveEvidence
+              ? `${formatOfficialForecastValue(canonicalWaveEvidence.value)} ${canonicalWaveEvidence.unit ?? 'm'}`
+              : 'Unavailable'}
+          </span>
+        </div>
+        <div className="w-px h-6 bg-slate-200 shrink-0" />
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-slate-400 uppercase">Wind</span>
+          <span className="text-xs font-black text-slate-800">
+            {canonicalWindEvidence
+              ? `${formatOfficialForecastValue(canonicalWindEvidence.value)} ${canonicalWindEvidence.unit ?? 'm/s'}`
+              : 'Unavailable'}
+          </span>
+        </div>
+        <div className="w-px h-6 bg-slate-200 shrink-0" />
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-slate-400 uppercase">Visibility</span>
+          <span className="text-xs font-black text-slate-800">
+            {officialVisibilityEvidence
+              ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)} ${officialVisibilityEvidence.unit ?? 'm'}`
+              : 'Unavailable'}
+          </span>
+        </div>
+        <div className="w-px h-6 bg-slate-200 shrink-0" />
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-slate-400 uppercase">Safety Index</span>
+          <span className="text-xs font-black text-slate-800">
+            {locationDecision?.decision?.safetyScore != null
+              ? `${locationDecision.decision.safetyScore}/100`
+              : 'Data insufficient'}
+          </span>
+        </div>
+        <div className="w-px h-6 bg-slate-200 shrink-0" />
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-slate-400 uppercase">SST</span>
+          <span className="text-xs font-black text-slate-800">Unavailable</span>
+        </div>
+        <div className="w-px h-6 bg-slate-200 shrink-0" />
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-slate-400 uppercase">Chlorophyll</span>
+          <span className="text-xs font-black text-slate-800">Unavailable</span>
+        </div>
+        <div className="w-px h-6 bg-slate-200 shrink-0" />
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-slate-400 uppercase">IMBL Dist</span>
+          <span className="text-xs font-black text-slate-800">—</span>
+        </div>
+      </div>
+
+      {/* 4. The Leaflet Map */}
+      {mapCenter ? <MapContainer
+        center={mapCenter}
+        zoom={11}
+        keyboard={false}
+        className="absolute top-16 bottom-0 left-0 right-0 z-0"
+        zoomControl={false}
+      >
+        <MapRecenter center={mapCenter} zoom={11} />
+        <MapOperatingLocationView
+          userCoordinates={userCoordinates}
+          selectedOperatingLocation={selectedOperatingLocation}
+        />
+        <MapClickHandler onMapClick={handleMapClick} />
+
+        <TileLayer
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; OpenStreetMap contributors'
+        />
+
+        {activeLayers.includes('INCOIS_SST') && (
+          <WMSTileLayer
+            url={INCOIS_PFZ_WMS_URL}
+            layers="sst"
+            format="image/png"
+            transparent
+            version="1.1.0"
+            opacity={0.45}
+            attribution="INCOIS PFZ-TUNA-SST-CHL WMS — sst"
+          />
         )}
 
-        {/* 3. Bottom Stats Bar */}
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[1000] glass-panel px-6 py-3 rounded-2xl flex gap-6 items-center border border-white/50 shadow-xl max-w-2xl overflow-x-auto">
-          <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-slate-400 uppercase">
-            Wave Height
-          </span>
-            <span className="text-xs font-black text-slate-800">
-            {canonicalWaveEvidence
-                ? `${formatOfficialForecastValue(canonicalWaveEvidence.value)} ${canonicalWaveEvidence.unit ?? 'm'}`
-                : 'Unavailable'}
-          </span>
-          </div>
+        {activeLayers.includes('INCOIS_CHL') && (
+          <WMSTileLayer
+            url={INCOIS_PFZ_WMS_URL}
+            layers="chl"
+            format="image/png"
+            transparent
+            version="1.1.0"
+            opacity={0.45}
+            attribution="INCOIS PFZ-TUNA-SST-CHL WMS — chl"
+          />
+        )}
 
-          <div className="w-px h-6 bg-slate-200 shrink-0" />
+        {/* Browser Geolocation Marker */}
+        {userCoordinates && (
+          <Marker position={[userCoordinates.latitude, userCoordinates.longitude]}>
+            <Popup>
+              <div className="p-1 space-y-1">
+                <strong className="text-sm font-bold text-slate-900">Your Location</strong>
+                <div className="text-xs text-slate-600">
+                  {userCoordinates.latitude.toFixed(5)}°N, {userCoordinates.longitude.toFixed(5)}°E
+                </div>
+                <div className="text-[10px] text-blue-600 font-bold">Browser Geolocation</div>
+              </div>
+            </Popup>
+          </Marker>
+        )}
 
-          <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-slate-400 uppercase">
-            Wind
-          </span>
-            <span className="text-xs font-black text-slate-800">
-            {canonicalWindEvidence
-                ? `${formatOfficialForecastValue(canonicalWindEvidence.value)} ${canonicalWindEvidence.unit ?? 'm/s'}`
-                : 'Unavailable'}
-          </span>
-          </div>
+        {selectedOperatingLocation && (
+          <CircleMarker
+            center={[
+              selectedOperatingLocation.latitude,
+              selectedOperatingLocation.longitude,
+            ]}
+            radius={10}
+            pathOptions={{
+              color: '#7c3aed',
+              fillColor: '#8b5cf6',
+              fillOpacity: 0.95,
+              weight: 3,
+            }}
+          >
+            <Popup>
+              <div className="p-1 space-y-1">
+                <strong className="text-sm font-bold text-slate-900">
+                  Operating Location
+                </strong>
+                <div className="text-xs font-semibold text-violet-700">
+                  {selectedOperatingLocation.name}
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  {selectedOperatingLocation.type.replaceAll('_', ' ')}
+                </div>
+              </div>
+            </Popup>
+          </CircleMarker>
+        )}
 
-          <div className="w-px h-6 bg-slate-200 shrink-0" />
+        {activityContext?.activity === 'marine_travel' && activityContext.origin?.latitude && (
+          <CircleMarker
+            center={[activityContext.origin.latitude, activityContext.origin.longitude]}
+            radius={9}
+            pathOptions={{
+              color: '#0d9488',
+              fillColor: '#2dd4bf',
+              fillOpacity: 0.9,
+              weight: 3,
+            }}
+          >
+            <Popup>
+              <div className="p-1 space-y-1">
+                <strong className="text-sm font-bold text-teal-800">Travel Origin</strong>
+                <div className="text-xs font-semibold text-slate-800">{activityContext.origin.name}</div>
+              </div>
+            </Popup>
+          </CircleMarker>
+        )}
 
-          <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-slate-400 uppercase">
-            Visibility
-          </span>
-            <span className="text-xs font-black text-slate-800">
-            {officialVisibilityEvidence
-                ? `${formatOfficialForecastValue(officialVisibilityEvidence.value)} ${officialVisibilityEvidence.unit ?? 'm'}`
-                : 'Unavailable'}
-          </span>
-          </div>
+        {activityContext?.activity === 'marine_travel' && activityContext.destination?.latitude && (
+          <CircleMarker
+            center={[activityContext.destination.latitude, activityContext.destination.longitude]}
+            radius={9}
+            pathOptions={{
+              color: '#0284c7',
+              fillColor: '#38bdf8',
+              fillOpacity: 0.9,
+              weight: 3,
+            }}
+          >
+            <Popup>
+              <div className="p-1 space-y-1">
+                <strong className="text-sm font-bold text-sky-800">Travel Destination</strong>
+                <div className="text-xs font-semibold text-slate-800">{activityContext.destination.name}</div>
+              </div>
+            </Popup>
+          </CircleMarker>
+        )}
 
-          <div className="w-px h-6 bg-slate-200 shrink-0" />
+        {operatingLocationConnection && selectedOperatingLocationDistance != null && (
+          <Polyline
+            positions={operatingLocationConnection}
+            pathOptions={{
+              color: '#7c3aed',
+              weight: 3,
+              opacity: 0.8,
+              dashArray: '8, 8',
+            }}
+          >
+            <Popup>
+              <div className="p-1 space-y-1">
+                <strong className="text-sm font-bold text-violet-700">
+                  Route to operating location
+                </strong>
+                <div className="text-xs text-slate-600">
+                  {formatMarineOperatingLocationDistance(selectedOperatingLocationDistance)} from your current location
+                </div>
+              </div>
+            </Popup>
+          </Polyline>
+        )}
 
-          <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-slate-400 uppercase">
-            Safety Index
-          </span>
-            <span className="text-xs font-black text-slate-800">
-            {locationDecision?.decision?.safetyScore != null
-                ? `${locationDecision.decision.safetyScore}/100`
-                : 'Data insufficient'}
-          </span>
-          </div>
+        {routePlan?.geometry?.coordinates && (
+          <>
+            <Polyline
+              positions={routePlan.geometry.coordinates}
+              pathOptions={{
+                color: '#06b6d4',
+                weight: 3.5,
+                opacity: 0.9,
+                dashArray: '8, 8',
+              }}
+            >
+              <Popup>
+                <div className="p-1 space-y-1">
+                  <div className="text-xs font-bold text-cyan-900 uppercase">
+                    Provisional Reference Corridor
+                  </div>
+                  <div className="text-[11px] font-semibold text-slate-800">
+                    Activity: {routePlan.routeRequest?.activity?.replaceAll('_', ' ')} • Distance: {routePlan.geometry.distanceNm?.toFixed(1)} NM
+                  </div>
+                  <div className="text-[10px] text-amber-800 font-bold">
+                    Provisional corridor — not certified nautical navigation.
+                  </div>
+                  <div className="text-[10px] text-slate-600 italic">
+                    {routePlan.geometry.disclaimer}
+                  </div>
+                </div>
+              </Popup>
+            </Polyline>
 
-          <div className="w-px h-6 bg-slate-200 shrink-0" />
+            {routePlan.target && extractCoordinates(routePlan.target) && (
+              <CircleMarker
+                center={extractCoordinates(routePlan.target)}
+                radius={9}
+                pathOptions={{
+                  color: routePlan.routeRequest?.activity === 'fishing' ? '#0d9488' : '#0284c7',
+                  fillColor: routePlan.routeRequest?.activity === 'fishing' ? '#2dd4bf' : '#38bdf8',
+                  fillOpacity: 0.9,
+                  weight: 3,
+                }}
+              >
+                <Popup>
+                  <div className="p-1 space-y-1">
+                    <strong className="text-xs font-bold text-sky-900">
+                      {routePlan.routeRequest?.activity === 'fishing' ? 'PFZ Target Zone' : 'Route Target / Destination'}
+                    </strong>
+                    <div className="text-xs text-slate-800 font-semibold">
+                      {routePlan.target.name || routePlan.target.id || 'Selected Operational Target'}
+                    </div>
+                    {routePlan.target.uid && (
+                      <div className="text-[10px] text-slate-600">UID: {routePlan.target.uid}</div>
+                    )}
+                    {routePlan.target.advisoryDate && (
+                      <div className="text-[10px] text-slate-600">Advisory: {routePlan.target.advisoryDate}</div>
+                    )}
+                    {(routePlan.evaluation?.bearingDeg != null || routePlan.geometry?.bearingDeg != null) && (
+                      <div className="text-[10px] text-cyan-800 font-mono">
+                        Bearing: {routePlan.evaluation?.bearingDeg ?? routePlan.geometry?.bearingDeg}° {routePlan.evaluation?.bearingCardinal ?? routePlan.geometry?.bearingCardinal}
+                      </div>
+                    )}
+                  </div>
+                </Popup>
+              </CircleMarker>
+            )}
+          </>
+        )}
 
-          <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-slate-400 uppercase">
-            SST
-          </span>
-            <span className="text-xs font-black text-slate-800">
-            Unavailable
-          </span>
-          </div>
+        {/* Inspection Click Pin */}
+        {clickedLocation && (
+          <Marker position={clickedLocation} icon={pinIcon}>
+            <Popup>
+              <div className="p-1 space-y-1">
+                <div className="font-bold text-xs text-blue-600 uppercase flex items-center gap-1">
+                  <MapPin size={12} /> Clicked Inspection Point
+                </div>
+                <div className="text-xs font-mono">
+                  {clickedLocation[0].toFixed(4)}°N, {clickedLocation[1].toFixed(4)}°E
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  {haversineNm(clickedLocation, mapCenter).toFixed(1)} NM from {userCoordinates ? 'Your Location' : (selectedOperatingLocation?.name || 'Center')}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        )}
 
-          <div className="w-px h-6 bg-slate-200 shrink-0" />
+        {/* PFZ Fishing Zones */}
+        {activeLayers.includes('PFZ') && (
+          <>
+            {/* Primary PFZ Zone */}
+            <Circle
+              center={scenario.pfz.coordinates}
+              radius={scenario.pfz.radius}
+              pathOptions={{ color: '#10b981', fillColor: '#10b981', fillOpacity: 0.2, weight: 2 }}
+            >
+              <Popup>
+                <div className="p-1 space-y-1">
+                  <div className="font-bold text-emerald-600 text-xs uppercase">Simulated Primary PFZ Zone</div>
+                  <strong className="text-sm">{scenario.pfz.name}</strong>
+                  <div className="text-xs text-slate-600">Target Species: <span className="font-semibold">{scenario.pfz.targetSpecies}</span></div>
+                  <div className="text-xs text-slate-600">Depth: {scenario.pfz.depthMeters} m | Confidence: <span className="font-bold text-emerald-600">{scenario.pfz.confidence}%</span></div>
+                  <div className="text-[10px] text-amber-600 font-bold">Source: simulated mockOcean data</div>
+                  <div className="text-[10px] text-slate-500 italic mt-1">{scenario.pfz.reason}</div>
+                </div>
+              </Popup>
+            </Circle>
 
-          <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-slate-400 uppercase">
-            Chlorophyll
-          </span>
-            <span className="text-xs font-black text-slate-800">
-            Unavailable
-          </span>
-          </div>
+            {/* Additional PFZ Zones */}
+            {scenario.pfz.additionalZones && scenario.pfz.additionalZones.map((zone, idx) => (
+              <Circle
+                key={`add-pfz-${idx}`}
+                center={zone.coordinates}
+                radius={zone.radius}
+                pathOptions={{ color: '#059669', fillColor: '#34d399', fillOpacity: 0.25, weight: 2, dashArray: '4, 4' }}
+              >
+                <Popup>
+                  <div className="p-1 space-y-1">
+                    <div className="font-bold text-teal-600 text-xs uppercase">Simulated Secondary PFZ Zone</div>
+                    <strong className="text-sm">{zone.name}</strong>
+                    <div className="text-xs text-slate-600">Target Species: <span className="font-semibold">{zone.targetSpecies}</span></div>
+                    <div className="text-xs text-slate-600">Depth: {zone.depthMeters} m | Confidence: <span className="font-bold text-teal-600">{zone.confidence}%</span></div>
+                    <div className="text-[10px] text-slate-500 italic mt-1">{zone.reason}</div>
+                  </div>
+                </Popup>
+              </Circle>
+            ))}
+          </>
+        )}
 
-          <div className="w-px h-6 bg-slate-200 shrink-0" />
+        {activeLayers.includes('OFFICIAL_PFZ') && officialPfzLines.map((line, index) => (
+          <Polyline
+            key={`official-pfz-${index}`}
+            positions={line}
+            pathOptions={{ color: '#7c3aed', weight: 2.5, opacity: 0.85 }}
+          >
+            <Popup>
+              <div className="p-1 space-y-1">
+                <div className="font-bold text-violet-600 text-xs uppercase">Official INCOIS PFZ Geometry</div>
+                <div className="text-xs text-slate-600">
+                  Advisory date: {officialPfz.advisoryDate ?? 'not provided'}
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  Source: {officialPfz.source.name} (WFS)
+                </div>
+              </div>
+            </Popup>
+          </Polyline>
+        ))}
 
-          <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-slate-400 uppercase">
-            IMBL Dist
-          </span>
-            <span className="text-xs font-black text-slate-800">—</span>
+        {/* IMBL Border & Buffer */}
+        {activeLayers.includes('IMBL') && (
+          <>
+            {bufferRing.length > 0 && (
+              <Polygon
+                positions={bufferRing}
+                pathOptions={{ color: '#f43f5e', fillColor: '#f43f5e', fillOpacity: 0.1, weight: 1 }}
+              />
+            )}
+            <Polyline
+              positions={imblLine}
+              pathOptions={{ color: '#e11d48', weight: 4 }}
+            >
+              <Popup>
+                <div className="p-1 space-y-1">
+                  <div className="font-bold text-rose-600 text-xs uppercase">Demo IMBL Boundary</div>
+                  <strong className="text-sm">{scenario.imbl.name}</strong>
+                  <div className="text-xs text-slate-600">Buffer Zone: {bufferNm} NM (Simulated Geofence)</div>
+                  <div className="text-[10px] text-slate-500 italic">Not an official maritime boundary.</div>
+                </div>
+              </Popup>
+            </Polyline>
+            {imblLine.map((pt, i) => (
+              <Circle
+                key={`imbl-cap-${i}`}
+                center={pt}
+                radius={bufferNm * NM_TO_METERS}
+                pathOptions={{ color: '#f43f5e', fillColor: '#f43f5e', fillOpacity: 0.04, weight: 0 }}
+              />
+            ))}
+          </>
+        )}
+
+        {/* Marine Protected Areas */}
+        {activeLayers.includes('MPA') && (
+          <Polygon
+            positions={scenario.mpa.coordinates}
+            pathOptions={{ color: '#fb923c', fillColor: '#fb923c', fillOpacity: 0.25, weight: 2 }}
+          >
+            <Popup>
+              <div className="p-1 space-y-1">
+                <div className="font-bold text-orange-600 text-xs uppercase">Marine Protected Area</div>
+                <strong className="text-sm">{scenario.mpa.name}</strong>
+                <div className="text-xs text-slate-600">{scenario.mpa.description}</div>
+              </div>
+            </Popup>
+          </Polygon>
+        )}
+
+        {/* Cyclone Track */}
+        {activeLayers.includes('CYCLONE') && scenario.cyclone.track.length > 0 && (
+          <>
+            <Polyline
+              positions={scenario.cyclone.track}
+              pathOptions={{ color: '#2563eb', weight: 3, dashArray: '6, 8' }}
+            >
+              <Popup>
+                <div className="p-1 space-y-1">
+                  <strong className="text-sm font-bold text-blue-700">{scenario.cyclone.name}</strong>
+                  <div className="text-xs text-slate-600">Category: {scenario.cyclone.category}</div>
+                  <div className="text-xs text-slate-600">Status: {scenario.cyclone.status}</div>
+                </div>
+              </Popup>
+            </Polyline>
+            <CircleMarker
+              center={scenario.cyclone.track[scenario.cyclone.track.length - 1]}
+              radius={9}
+              pathOptions={{ color: '#1d4ed8', fillColor: '#2563eb', fillOpacity: 0.9 }}
+            >
+              <Popup>
+                <div className="p-1 space-y-1">
+                  <strong className="text-sm font-bold text-blue-700">{scenario.cyclone.name}</strong>
+                  <div className="text-xs text-slate-600">Category: {scenario.cyclone.category}</div>
+                  <div className="text-xs text-slate-600">Status: {scenario.cyclone.status}</div>
+                  <div className="text-[10px] text-slate-500 italic">{scenario.cyclone.note}</div>
+                </div>
+              </Popup>
+            </CircleMarker>
+          </>
+        )}
+
+        {/* Trawler Active Simulation Route */}
+        {isSimulating && (
+          <Polyline
+            positions={route}
+            pathOptions={{ color: '#2563eb', weight: 4, dashArray: '10, 10' }}
+          />
+        )}
+
+        {/* Animated Trawler Marker */}
+        {isSimulating && (
+          <Marker position={boatPosition} icon={trawlerIcon}>
+            <Popup>
+              <div className="p-1 space-y-1">
+                <div className="font-bold text-xs text-blue-600 uppercase">Simulated Trawler</div>
+                <strong className="text-sm">{scenario.trawlerRoute.vesselId}</strong>
+                <div className="text-xs text-slate-600">Status: {isAnimating ? scenario.trawlerRoute.status : 'Paused'}</div>
+                <div className="text-xs text-slate-600">IMBL Distance: <span className="font-bold text-slate-900">{liveImblNm.toFixed(1)} NM</span></div>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+      </MapContainer> : (
+        <div className="absolute top-16 bottom-0 left-0 right-0 z-0 bg-slate-100 flex items-center justify-center p-6">
+          <div className="glass-panel max-w-lg rounded-3xl px-6 py-8 text-center shadow-xl border border-white/60">
+            <MapPin className="mx-auto mb-3 text-blue-600" size={30} />
+            <h2 className="text-sm font-black text-slate-800">
+              {locationStatus === 'loading'
+                ? 'Getting your location…'
+                : 'Select a Marine Operating Location'}
+            </h2>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600">
+              {locationStatus === 'loading'
+                ? 'Allow browser location access to load location-specific marine intelligence.'
+                : 'Browser GPS is optional. Choose an official marine operating location to load Command Map intelligence:'}
+            </p>
+
+            {locationStatus !== 'loading' && (
+              <div className="mt-4 grid grid-cols-2 gap-2 text-left">
+                {MARINE_OPERATING_LOCATIONS.slice(0, 6).map((loc) => (
+                  <button
+                    key={loc.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedOperatingLocation(loc)
+                      setLocationDecision(null)
+                    }}
+                    className="p-2.5 rounded-xl border border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50 transition-all text-xs font-bold text-slate-800"
+                  >
+                    <span className="block truncate">{loc.name.replace(' Port Authority', '')}</span>
+                    <span className="block text-[10px] text-slate-500 font-normal capitalize">
+                      {loc.type.replaceAll('_', ' ')}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {locationStatus === 'error' && (
+              <button
+                type="button"
+                onClick={requestLocation}
+                className="mt-5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-black"
+              >
+                Retry Location Access
+              </button>
+            )}
           </div>
         </div>
+      )}
 
-        {/* 4. The Leaflet Map */}
-        {mapCenter ? (
-            <MapContainer
-                center={mapCenter}
-                zoom={11}
-                keyboard={false}
-                className="absolute top-16 bottom-0 left-0 right-0 z-0"
-                zoomControl={false}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="pointer-events-auto absolute top-20 left-1/2 z-[3000] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col items-center">
+          <div className="glass-panel flex max-w-full items-center gap-2 rounded-2xl border border-white/60 px-3 py-2 text-left shadow-xl">
+            <MapPin className="shrink-0 text-blue-600" size={17} />
+            <button
+              type="button"
+              onClick={() => setIsOperatingLocationOpen((open) => !open)}
+              className="min-w-0 text-left"
+              aria-expanded={isOperatingLocationOpen}
+              aria-controls="nearby-marine-operating-locations"
             >
-              <MapRecenter center={mapCenter} zoom={11} />
-
-              <MapOperatingLocationView
-                  userCoordinates={userCoordinates}
-                  selectedOperatingLocation={selectedOperatingLocation}
-              />
-
-              <MapClickHandler onMapClick={handleMapClick} />
-
-              <TileLayer
-                  url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  attribution="&copy; OpenStreetMap contributors"
-              />
-
-              {activeLayers.includes('INCOIS_SST') && (
-                  <WMSTileLayer
-                      url={INCOIS_PFZ_WMS_URL}
-                      layers="sst"
-                      format="image/png"
-                      transparent
-                      version="1.1.0"
-                      opacity={0.45}
-                      attribution="INCOIS PFZ-TUNA-SST-CHL WMS — sst"
-                  />
-              )}
-
-              {activeLayers.includes('INCOIS_CHL') && (
-                  <WMSTileLayer
-                      url={INCOIS_PFZ_WMS_URL}
-                      layers="chl"
-                      format="image/png"
-                      transparent
-                      version="1.1.0"
-                      opacity={0.45}
-                      attribution="INCOIS PFZ-TUNA-SST-CHL WMS — chl"
-                  />
-              )}
-
-              {/* Browser Geolocation Marker */}
-              {userCoordinates && (
-                  <Marker
-                      position={[
-                        userCoordinates.latitude,
-                        userCoordinates.longitude,
-                      ]}
-                  >
-                    <Popup>
-                      <div className="p-1 space-y-1">
-                        <strong className="text-sm font-bold text-slate-900">
-                          Your Location
-                        </strong>
-
-                        <div className="text-xs text-slate-600">
-                          {userCoordinates.latitude.toFixed(5)}°N,{' '}
-                          {userCoordinates.longitude.toFixed(5)}°E
-                        </div>
-
-                        <div className="text-[10px] text-blue-600 font-bold">
-                          Browser Geolocation
-                        </div>
-                      </div>
-                    </Popup>
-                  </Marker>
-              )}
-
-              {selectedOperatingLocation && (
-                  <CircleMarker
-                      center={[
-                        selectedOperatingLocation.latitude,
-                        selectedOperatingLocation.longitude,
-                      ]}
-                      radius={10}
-                      pathOptions={{
-                        color: '#7c3aed',
-                        fillColor: '#8b5cf6',
-                        fillOpacity: 0.95,
-                        weight: 3,
-                      }}
-                  >
-                    <Popup>
-                      <div className="p-1 space-y-1">
-                        <strong className="text-sm font-bold text-slate-900">
-                          Operating Location
-                        </strong>
-
-                        <div className="text-xs font-semibold text-violet-700">
-                          {selectedOperatingLocation.name}
-                        </div>
-
-                        <div className="text-[10px] text-slate-500">
-                          {selectedOperatingLocation.type.replaceAll('_', ' ')}
-                        </div>
-                      </div>
-                    </Popup>
-                  </CircleMarker>
-              )}
-
-              {operatingLocationConnection &&
-                  selectedOperatingLocationDistance != null && (
-                      <Polyline
-                          positions={operatingLocationConnection}
-                          pathOptions={{
-                            color: '#7c3aed',
-                            weight: 3,
-                            opacity: 0.8,
-                            dashArray: '8, 8',
-                          }}
-                      >
-                        <Popup>
-                          <div className="p-1 space-y-1">
-                            <strong className="text-sm font-bold text-violet-700">
-                              Route to operating location
-                            </strong>
-
-                            <div className="text-xs text-slate-600">
-                              {formatMarineOperatingLocationDistance(
-                                  selectedOperatingLocationDistance
-                              )}{' '}
-                              from your current location
-                            </div>
-                          </div>
-                        </Popup>
-                      </Polyline>
-                  )}
-
-              {/* Inspection Click Pin */}
-              {clickedLocation && (
-                  <Marker position={clickedLocation} icon={pinIcon}>
-                    <Popup>
-                      <div className="p-1 space-y-1">
-                        <div className="font-bold text-xs text-blue-600 uppercase flex items-center gap-1">
-                          <MapPin size={12} /> Clicked Inspection Point
-                        </div>
-
-                        <div className="text-xs font-mono">
-                          {clickedLocation[0].toFixed(4)}°N,{' '}
-                          {clickedLocation[1].toFixed(4)}°E
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          {userCoordinates
-                              ? `${haversineNm(
-                                  clickedLocation,
-                                  [userCoordinates.latitude, userCoordinates.longitude]
-                              ).toFixed(1)} NM from Your Location`
-                              : 'Distance from your location unavailable'}
-                        </div>
-                      </div>
-                    </Popup>
-                  </Marker>
-              )}
-
-              {/* PFZ Fishing Zones */}
-              {activeLayers.includes('PFZ') && (
-                  <>
-                    {/* Primary PFZ Zone */}
-                    <Circle
-                        center={scenario.pfz.coordinates}
-                        radius={scenario.pfz.radius}
-                        pathOptions={{
-                          color: '#10b981',
-                          fillColor: '#10b981',
-                          fillOpacity: 0.2,
-                          weight: 2,
-                        }}
-                    >
-                      <Popup>
-                        <div className="p-1 space-y-1">
-                          <div className="font-bold text-emerald-600 text-xs uppercase">
-                            Simulated Primary PFZ Zone
-                          </div>
-
-                          <strong className="text-sm">
-                            {scenario.pfz.name}
-                          </strong>
-
-                          <div className="text-xs text-slate-600">
-                            Target Species:{' '}
-                            <span className="font-semibold">
-                        {scenario.pfz.targetSpecies}
-                      </span>
-                          </div>
-
-                          <div className="text-xs text-slate-600">
-                            Depth: {scenario.pfz.depthMeters} m | Confidence:{' '}
-                            <span className="font-bold text-emerald-600">
-                        {scenario.pfz.confidence}%
-                      </span>
-                          </div>
-
-                          <div className="text-[10px] text-amber-600 font-bold">
-                            Source: simulated mockOcean data
-                          </div>
-
-                          <div className="text-[10px] text-slate-500 italic mt-1">
-                            {scenario.pfz.reason}
-                          </div>
-                        </div>
-                      </Popup>
-                    </Circle>
-
-                    {/* Additional PFZ Zones */}
-                    {scenario.pfz.additionalZones &&
-                        scenario.pfz.additionalZones.map((zone, idx) => (
-                            <Circle
-                                key={`add-pfz-${idx}`}
-                                center={zone.coordinates}
-                                radius={zone.radius}
-                                pathOptions={{
-                                  color: '#059669',
-                                  fillColor: '#34d399',
-                                  fillOpacity: 0.25,
-                                  weight: 2,
-                                  dashArray: '4, 4',
-                                }}
-                            >
-                              <Popup>
-                                <div className="p-1 space-y-1">
-                                  <div className="font-bold text-teal-600 text-xs uppercase">
-                                    Simulated Secondary PFZ Zone
-                                  </div>
-
-                                  <strong className="text-sm">
-                                    {zone.name}
-                                  </strong>
-
-                                  <div className="text-xs text-slate-600">
-                                    Target Species:{' '}
-                                    <span className="font-semibold">
-                            {zone.targetSpecies}
-                          </span>
-                                  </div>
-
-                                  <div className="text-xs text-slate-600">
-                                    Depth: {zone.depthMeters} m | Confidence:{' '}
-                                    <span className="font-bold text-teal-600">
-                            {zone.confidence}%
-                          </span>
-                                  </div>
-
-                                  <div className="text-[10px] text-slate-500 italic mt-1">
-                                    {zone.reason}
-                                  </div>
-                                </div>
-                              </Popup>
-                            </Circle>
-                        ))}
-                  </>
-              )}
-
-              {activeLayers.includes('OFFICIAL_PFZ') &&
-                  officialPfzLines.map((line, index) => (
-                      <Polyline
-                          key={`official-pfz-${index}`}
-                          positions={line}
-                          pathOptions={{
-                            color: '#7c3aed',
-                            weight: 2.5,
-                            opacity: 0.85,
-                          }}
-                      >
-                        <Popup>
-                          <div className="p-1 space-y-1">
-                            <div className="font-bold text-violet-600 text-xs uppercase">
-                              Official INCOIS PFZ Geometry
-                            </div>
-
-                            <div className="text-xs text-slate-600">
-                              Advisory date: {officialPfz.advisoryDate ?? 'not provided'}
-                            </div>
-
-                            <div className="text-[10px] text-slate-500">
-                              Source: {officialPfz.source.name} (WFS)
-                            </div>
-                          </div>
-                        </Popup>
-                      </Polyline>
-                  ))}
-
-              {/* IMBL Border & Buffer */}
-              {activeLayers.includes('IMBL') && (
-                  <>
-                    {bufferRing.length > 0 && (
-                        <Polygon
-                            positions={bufferRing}
-                            pathOptions={{
-                              color: '#f43f5e',
-                              fillColor: '#f43f5e',
-                              fillOpacity: 0.1,
-                              weight: 1,
-                            }}
-                        />
-                    )}
-
-                    <Polyline
-                        positions={imblLine}
-                        pathOptions={{
-                          color: '#e11d48',
-                          weight: 4,
-                        }}
-                    >
-                      <Popup>
-                        <div className="p-1 space-y-1">
-                          <div className="font-bold text-rose-600 text-xs uppercase">
-                            Demo IMBL Boundary
-                          </div>
-
-                          <strong className="text-sm">
-                            {scenario.imbl.name}
-                          </strong>
-
-                          <div className="text-xs text-slate-600">
-                            Buffer Zone: {bufferNm} NM (Simulated Geofence)
-                          </div>
-
-                          <div className="text-[10px] text-slate-500 italic">
-                            Not an official maritime boundary.
-                          </div>
-                        </div>
-                      </Popup>
-                    </Polyline>
-
-                    {imblLine.map((pt, i) => (
-                        <Circle
-                            key={`imbl-cap-${i}`}
-                            center={pt}
-                            radius={bufferNm * NM_TO_METERS}
-                            pathOptions={{
-                              color: '#f43f5e',
-                              fillColor: '#f43f5e',
-                              fillOpacity: 0.04,
-                              weight: 0,
-                            }}
-                        />
-                    ))}
-                  </>
-              )}
-
-              {/* Marine Protected Areas */}
-              {activeLayers.includes('MPA') && (
-                  <Polygon
-                      positions={scenario.mpa.coordinates}
-                      pathOptions={{
-                        color: '#fb923c',
-                        fillColor: '#fb923c',
-                        fillOpacity: 0.25,
-                        weight: 2,
-                      }}
-                  >
-                    <Popup>
-                      <div className="p-1 space-y-1">
-                        <div className="font-bold text-orange-600 text-xs uppercase">
-                          Marine Protected Area
-                        </div>
-
-                        <strong className="text-sm">
-                          {scenario.mpa.name}
-                        </strong>
-
-                        <div className="text-xs text-slate-600">
-                          {scenario.mpa.description}
-                        </div>
-                      </div>
-                    </Popup>
-                  </Polygon>
-              )}
-
-              {/* Cyclone Track */}
-              {activeLayers.includes('CYCLONE') &&
-                  scenario.cyclone.track.length > 0 && (
-                      <>
-                        <Polyline
-                            positions={scenario.cyclone.track}
-                            pathOptions={{
-                              color: '#2563eb',
-                              weight: 3,
-                              dashArray: '6, 8',
-                            }}
-                        >
-                          <Popup>
-                            <div className="p-1 space-y-1">
-                              <strong className="text-sm font-bold text-blue-700">
-                                {scenario.cyclone.name}
-                              </strong>
-
-                              <div className="text-xs text-slate-600">
-                                Category: {scenario.cyclone.category}
-                              </div>
-
-                              <div className="text-xs text-slate-600">
-                                Status: {scenario.cyclone.status}
-                              </div>
-                            </div>
-                          </Popup>
-                        </Polyline>
-
-                        <CircleMarker
-                            center={
-                              scenario.cyclone.track[
-                              scenario.cyclone.track.length - 1
-                                  ]
-                            }
-                            radius={9}
-                            pathOptions={{
-                              color: '#1d4ed8',
-                              fillColor: '#2563eb',
-                              fillOpacity: 0.9,
-                            }}
-                        >
-                          <Popup>
-                            <div className="p-1 space-y-1">
-                              <strong className="text-sm font-bold text-blue-700">
-                                {scenario.cyclone.name}
-                              </strong>
-
-                              <div className="text-xs text-slate-600">
-                                Category: {scenario.cyclone.category}
-                              </div>
-
-                              <div className="text-xs text-slate-600">
-                                Status: {scenario.cyclone.status}
-                              </div>
-
-                              <div className="text-[10px] text-slate-500 italic">
-                                {scenario.cyclone.note}
-                              </div>
-                            </div>
-                          </Popup>
-                        </CircleMarker>
-                      </>
-                  )}
-
-              {/* Trawler Active Simulation Route */}
-              {isSimulating && (
-                  <Polyline
-                      positions={route}
-                      pathOptions={{
-                        color: '#2563eb',
-                        weight: 4,
-                        dashArray: '10, 10',
-                      }}
-                  />
-              )}
-
-              {/* Animated Trawler Marker */}
-              {isSimulating && (
-                  <Marker position={boatPosition} icon={trawlerIcon}>
-                    <Popup>
-                      <div className="p-1 space-y-1">
-                        <div className="font-bold text-xs text-blue-600 uppercase">
-                          Simulated Trawler
-                        </div>
-
-                        <strong className="text-sm">
-                          {scenario.trawlerRoute.vesselId}
-                        </strong>
-
-                        <div className="text-xs text-slate-600">
-                          Status:{' '}
-                          {isAnimating
-                              ? scenario.trawlerRoute.status
-                              : 'Paused'}
-                        </div>
-
-                        <div className="text-xs text-slate-600">
-                          IMBL Distance:{' '}
-                          <span className="font-bold text-slate-900">
-                      {liveImblNm.toFixed(1)} NM
-                    </span>
-                        </div>
-                      </div>
-                    </Popup>
-                  </Marker>
-              )}
-            </MapContainer>
-        ) : (
-            <div className="absolute top-16 bottom-0 left-0 right-0 z-0 bg-slate-100 flex items-center justify-center p-6">
-              <div className="glass-panel max-w-md rounded-3xl px-6 py-8 text-center shadow-xl border border-white/60">
-                <MapPin
-                    className="mx-auto mb-3 text-blue-600"
-                    size={30}
-                />
-
-                <h2 className="text-sm font-black text-slate-800">
-                  {locationStatus === 'loading'
-                      ? 'Getting your location…'
-                      : 'Select a Marine Operating Location'}
-                </h2>
-
-                <p className="mt-2 text-xs leading-relaxed text-slate-600">
-                  {locationStatus === 'loading'
-                      ? 'You can allow browser location access to discover nearby marine operating locations.'
-                      : 'Browser GPS is optional. Choose an official marine operating location to load Command Map intelligence.'}
-                </p>
-
-                {locationStatus === 'error' && (
-                    <button
-                        type="button"
-                        onClick={requestLocation}
-                        className="mt-5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-black"
-                    >
-                      Retry Location Access
-                    </button>
-                )}
-              </div>
-            </div>
-        )}
-
-        <div className="pointer-events-none absolute inset-0">
-          <div className="pointer-events-auto absolute top-20 left-1/2 z-[3000] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col items-center">
-            <div className="glass-panel flex max-w-full items-center gap-2 rounded-2xl border border-white/60 px-3 py-2 text-left shadow-xl">
-              <MapPin
-                  className="shrink-0 text-blue-600"
-                  size={17}
-              />
-
-              <button
-                  type="button"
-                  onClick={() =>
-                      setIsOperatingLocationOpen((open) => !open)
-                  }
-                  className="min-w-0 text-left"
-                  aria-expanded={isOperatingLocationOpen}
-                  aria-controls="nearby-marine-operating-locations"
-              >
-                {selectedOperatingLocation ? (
-                    <>
+              {selectedOperatingLocation ? (
+                <>
                   <span className="block text-[9px] font-black uppercase tracking-widest text-slate-400">
                     Operating from
                   </span>
-
-                      <span className="block max-w-[16rem] truncate text-xs font-bold text-slate-900">
+                  <span className="block max-w-[16rem] truncate text-xs font-bold text-slate-900">
                     {selectedOperatingLocation.name}
                   </span>
-                    </>
-                ) : (
-                    <>
+                </>
+              ) : (
+                <>
                   <span className="block text-[9px] font-black uppercase tracking-widest text-slate-400">
-                    {locationStatus === 'loading'
-                        ? 'Getting your location…'
-                        : 'Your Location'}
+                    {locationStatus === 'loading' ? 'Getting your location…' : 'Your Location'}
                   </span>
-
-                      <span className="block text-xs font-bold text-slate-900">
+                  <span className="block text-xs font-bold text-slate-900">
                     {locationStatus === 'error'
-                        ? 'Location unavailable'
-                        : 'Nearby operating locations'}
+                      ? 'Location unavailable'
+                      : 'Nearby operating locations'}
                   </span>
-                    </>
-                )}
-              </button>
-
-              {selectedOperatingLocation && (
-                  <>
-                    <button
-                        type="button"
-                        onClick={() => setIsOperatingLocationOpen(true)}
-                        className="shrink-0 rounded-lg px-1.5 py-1 text-[10px] font-bold text-violet-700 hover:bg-violet-50"
-                    >
-                      Change
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedOperatingLocation(null)
-                          setIsOperatingLocationOpen(false)
-                        }}
-                        className="shrink-0 rounded-lg px-1.5 py-1 text-[10px] font-bold text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        aria-label="Clear operating location"
-                    >
-                      Clear
-                    </button>
-                  </>
+                </>
               )}
-
-              <span className="shrink-0 text-[10px] font-black text-slate-400">
+            </button>
+            {selectedOperatingLocation && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsOperatingLocationOpen(true)}
+                  className="shrink-0 rounded-lg px-1.5 py-1 text-[10px] font-bold text-violet-700 hover:bg-violet-50"
+                >
+                  Change
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedOperatingLocation(null)
+                    setIsOperatingLocationOpen(false)
+                  }}
+                  className="shrink-0 rounded-lg px-1.5 py-1 text-[10px] font-bold text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="Clear operating location"
+                >
+                  Clear
+                </button>
+              </>
+            )}
+            <span className="shrink-0 text-[10px] font-black text-slate-400">
               {isOperatingLocationOpen ? '×' : '⌄'}
             </span>
-            </div>
-
-            {mapCenter &&
-                selectedOperatingLocation &&
-                !isOperatingLocationOpen &&
-                selectedOperatingLocationDistance != null && (
-                    <div className="mt-1 rounded-full bg-violet-600 px-3 py-1 text-[10px] font-bold capitalize tracking-wide text-white shadow-md">
-                      {selectedOperatingLocation.type.replaceAll('_', ' ')} ·{' '}
-                      {formatMarineOperatingLocationDistance(
-                          selectedOperatingLocationDistance
-                      )}{' '}
-                      from your current location
-                    </div>
-                )}
-
-            {mapCenter && isOperatingLocationOpen && (
-                <div
-                    id="nearby-marine-operating-locations"
-                    className="mt-2 w-[min(23rem,calc(100vw-2rem))] rounded-3xl border border-white/60 bg-white/95 p-4 shadow-2xl backdrop-blur-md"
-                >
-                  <div className="mb-3">
-                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
-                      Nearby Marine Operating Locations
-                    </div>
-
-                    <div className="mt-1 text-xs text-slate-500">
-                      Based on your current location · Available supported locations
-                    </div>
-                  </div>
-
-                  {nearbyOperatingLocations.length > 0 ? (
-                      <div className="max-h-[min(22rem,55vh)] space-y-2 overflow-y-auto">
-                        {nearbyOperatingLocations.map(
-                            ({ location, distanceKm }) => (
-                                <button
-                                    key={location.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedOperatingLocation(location)
-                                      setLocationDecision(null)
-                                      setIsOperatingLocationOpen(false)
-                                    }}
-                                    className="flex w-full items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-left transition hover:border-violet-200 hover:bg-violet-50"
-                                >
-                        <span
-                            className="mt-0.5 text-base"
-                            aria-hidden="true"
-                        >
-                          ⚓
-                        </span>
-
-                                  <span className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-black text-slate-800">
-                            {location.name}
-                          </span>
-
-                          <span className="mt-0.5 block text-[10px] capitalize text-slate-500">
-                            {location.type.replaceAll('_', ' ')}
-                            {location.state
-                                ? ` · ${location.state}`
-                                : ''}
-                          </span>
-                        </span>
-
-                                  <span className="shrink-0 text-[10px] font-bold text-violet-700">
-                          {formatMarineOperatingLocationDistance(
-                              distanceKm
-                          )}
-                        </span>
-                                </button>
-                            )
-                        )}
-                      </div>
-                  ) : (
-                      <div className="rounded-2xl bg-slate-50 px-4 py-4 text-center">
-                        <div className="text-xs font-black text-slate-700">
-                          No nearby marine operating locations found
-                        </div>
-
-                        <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-                          Your current location does not have a supported
-                          operating location nearby. ORCA cannot determine a
-                          relevant marine operating area from the currently
-                          available location data.
-                        </p>
-
-                        <button
-                            type="button"
-                            onClick={requestLocation}
-                            className="mt-3 rounded-xl bg-slate-900 px-3 py-2 text-[10px] font-bold text-white hover:bg-black"
-                        >
-                          Retry Location
-                        </button>
-                      </div>
-                  )}
-
-                  <div className="mt-3 text-[9px] text-slate-400">
-                    Source: MoPSW Basic Port Statistics of India 2024-25 · Table 1.3
-                  </div>
-                </div>
-            )}
           </div>
-        </div>
 
-        {/* Geofence Alert Banner */}
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[2000] flex flex-col gap-2">
-          <AnimatePresence>
-            {notifications.map((n) => (
-                <motion.div
-                    key={n.id}
-                    initial={{ y: -50, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="bg-rose-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 font-bold text-xs"
-                >
-                  <ShieldAlert size={18} />
+          {activityContext?.activity === 'marine_travel' && (activityContext.origin || activityContext.destination) && (
+            <div className="mt-1 flex items-center gap-2 rounded-full bg-cyan-700 px-3.5 py-1 text-[10px] font-bold text-white shadow-md">
+              <span>Marine Travel:</span>
+              {activityContext.origin && <span>From {activityContext.origin.name.replace(' Port Authority', '')}</span>}
+              {activityContext.destination && <span>To {activityContext.destination.name.replace(' Port Authority', '')}</span>}
+            </div>
+          )}
 
-                  {n.message}
+          {mapCenter && selectedOperatingLocation && !isOperatingLocationOpen && selectedOperatingLocationDistance != null && (
+            <div className="mt-1 rounded-full bg-violet-600 px-3 py-1 text-[10px] font-bold capitalize tracking-wide text-white shadow-md">
+              {selectedOperatingLocation.type.replaceAll('_', ' ')} ·{' '}
+              {formatMarineOperatingLocationDistance(selectedOperatingLocationDistance)}{' '}
+              from your current location
+            </div>
+          )}
 
+          {mapCenter && isOperatingLocationOpen && (
+            <div
+              id="nearby-marine-operating-locations"
+              className="mt-2 w-[min(23rem,calc(100vw-2rem))] rounded-3xl border border-white/60 bg-white/95 p-4 shadow-2xl backdrop-blur-md"
+            >
+              <div className="mb-3">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                  {userCoordinates ? 'Nearby Marine Operating Locations' : 'Marine Operating Locations'}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {userCoordinates
+                    ? 'Based on your current location · Available supported locations'
+                    : 'Select an official marine operating location'}
+                </div>
+              </div>
+
+              {(nearbyOperatingLocations.length > 0 || !userCoordinates) ? (
+                <div className="max-h-[min(22rem,55vh)] space-y-2 overflow-y-auto">
+                  {(nearbyOperatingLocations.length > 0
+                    ? nearbyOperatingLocations
+                    : MARINE_OPERATING_LOCATIONS.map((loc) => ({ location: loc, distanceKm: null }))
+                  ).map(({ location, distanceKm }) => (
+                    <button
+                      key={location.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedOperatingLocation(location)
+                        setLocationDecision(null)
+                        setIsOperatingLocationOpen(false)
+                      }}
+                      className="flex w-full items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-left transition hover:border-violet-200 hover:bg-violet-50"
+                    >
+                      <span className="mt-0.5 text-base" aria-hidden="true">⚓</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-black text-slate-800">
+                          {location.name}
+                        </span>
+                        <span className="mt-0.5 block text-[10px] capitalize text-slate-500">
+                          {location.type.replaceAll('_', ' ')}
+                          {location.state ? ` · ${location.state}` : ''}
+                        </span>
+                      </span>
+                      {distanceKm != null && (
+                        <span className="shrink-0 text-[10px] font-bold text-violet-700">
+                          {formatMarineOperatingLocationDistance(distanceKm)}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-slate-50 px-4 py-4 text-center">
+                  <div className="text-xs font-black text-slate-700">
+                    No nearby marine operating locations found
+                  </div>
+                  <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                    Your current location does not have a supported operating location nearby.
+                    ORCA cannot determine a relevant marine operating area from the currently
+                    available location data.
+                  </p>
                   <button
-                      onClick={() => setNotifications([])}
-                      className="ml-4 opacity-70 hover:opacity-100 font-black"
+                    type="button"
+                    onClick={requestLocation}
+                    className="mt-3 rounded-xl bg-slate-900 px-3 py-2 text-[10px] font-bold text-white hover:bg-black"
                   >
-                    ×
+                    Retry Location
                   </button>
-                </motion.div>
-            ))}
-          </AnimatePresence>
+                </div>
+              )}
+
+              <div className="mt-3 text-[9px] text-slate-400">
+                Source: MoPSW Basic Port Statistics of India 2024-25 · Table 1.3
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Geofence Alert Banner */}
+      <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[2000] flex flex-col gap-2">
+        <AnimatePresence>
+          {notifications.map((n) => (
+            <motion.div
+              key={n.id}
+              initial={{ y: -50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-rose-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 font-bold text-xs"
+            >
+              <ShieldAlert size={18} /> {n.message}
+              <button onClick={() => setNotifications([])} className="ml-4 opacity-70 hover:opacity-100 font-black">
+                ×
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+      {/* Active Route Corridor Card */}
+      {routePlan && (
+        <div className="absolute top-20 right-6 z-[3000] w-84 sm:w-96 max-h-[82vh] overflow-y-auto bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-xl border border-cyan-200/90 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-cyan-600 text-white flex items-center justify-center shadow-sm shadow-cyan-500/30">
+                <Navigation size={14} />
+              </div>
+              <div>
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-tight">
+                  Active Marine Corridor
+                </h4>
+                <span className="text-[10px] font-bold text-cyan-700 capitalize">
+                  {routePlan.routeRequest?.activity?.replaceAll('_', ' ')}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={clearRoutePlan}
+              className="w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center text-xs font-bold transition-colors"
+              title="Clear active route corridor"
+              aria-label="Clear active route corridor"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Core Metrics: Distance & Bearing */}
+          <div className="grid grid-cols-2 gap-2 bg-cyan-50/70 p-2.5 rounded-xl border border-cyan-100">
+            <div>
+              <span className="block text-[9px] font-bold uppercase text-slate-400">Reference Distance</span>
+              <span className="text-xs font-mono font-black text-cyan-900">
+                {routePlan.geometry?.distanceNm?.toFixed(1) ?? '—'} NM
+              </span>
+            </div>
+            <div>
+              <span className="block text-[9px] font-bold uppercase text-slate-400">Seaward Bearing</span>
+              <span className="text-xs font-mono font-black text-cyan-900">
+                {routePlan.evaluation?.bearingDeg ?? routePlan.geometry?.bearingDeg ?? '—'}° {routePlan.evaluation?.bearingCardinal ?? routePlan.geometry?.bearingCardinal ?? ''}
+              </span>
+            </div>
+          </div>
+
+          {/* Activity Specific Metadata */}
+          {routePlan.routeRequest?.activity === 'fishing' && (
+            <div className="space-y-1.5 p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-[11px]">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Departure Origin:</span>
+                <span className="font-semibold text-slate-800 truncate max-w-[180px]">{routePlan.origin?.name || 'Selected Port'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">PFZ Target:</span>
+                <span className="font-semibold text-cyan-900 truncate max-w-[180px]">{routePlan.target?.name || routePlan.selectedPfz?.name || 'INCOIS PFZ Zone'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Target UID:</span>
+                <span className="font-mono text-slate-700">{routePlan.target?.uid || routePlan.selectedPfz?.uid || 'Unavailable'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Advisory Date:</span>
+                <span className="font-mono text-slate-700">{routePlan.target?.advisoryDate || routePlan.selectedPfz?.advisoryDate || 'Unavailable'}</span>
+              </div>
+            </div>
+          )}
+
+          {routePlan.routeRequest?.activity === 'marine_travel' && (
+            <div className="space-y-1.5 p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-[11px]">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Origin Endpoint:</span>
+                <span className="font-semibold text-slate-800 truncate max-w-[170px]">{routePlan.origin?.name || 'Origin'}</span>
+              </div>
+              {routePlan.endpointAssessment?.origin?.summary && (
+                <div className="text-[10px] text-slate-600 pl-2">
+                  • {routePlan.endpointAssessment.origin.summary}
+                </div>
+              )}
+              <div className="flex justify-between pt-1">
+                <span className="text-slate-500">Destination Endpoint:</span>
+                <span className="font-semibold text-slate-800 truncate max-w-[170px]">{routePlan.destination?.name || 'Destination'}</span>
+              </div>
+              {routePlan.endpointAssessment?.destination?.summary && (
+                <div className="text-[10px] text-slate-600 pl-2">
+                  • {routePlan.endpointAssessment.destination.summary}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Status & Recommendation */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                routePlan.recommendation?.recommended
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-amber-100 text-amber-800'
+              }`}>
+                {routePlan.status.replaceAll('_', ' ')}
+              </span>
+              <span className="text-[10px] font-bold text-slate-700">
+                {routePlan.recommendation?.state}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-600 font-medium leading-tight">
+              {routePlan.recommendation?.reason}
+            </p>
+          </div>
+
+          {/* Evidence Used */}
+          <div className="space-y-1">
+            <span className="block text-[9px] font-bold uppercase text-slate-400">Evidence Used</span>
+            <div className="flex flex-wrap gap-1">
+              {(routePlan.constraintsApplied && routePlan.constraintsApplied.length > 0
+                ? routePlan.constraintsApplied
+                : ['cyclone_hazard_check', 'marine_wind_wave_check']
+              ).map((ev, i) => (
+                <span key={i} className="text-[9px] bg-cyan-50 text-cyan-800 border border-cyan-100 px-1.5 py-0.5 rounded-md font-mono">
+                  {ev.replaceAll('_', ' ')}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Unavailable Constraints */}
+          <div className="space-y-1">
+            <span className="block text-[9px] font-bold uppercase text-slate-400">Unavailable Constraints</span>
+            <div className="flex flex-wrap gap-1">
+              {(routePlan.constraintsUnavailable && routePlan.constraintsUnavailable.length > 0
+                ? routePlan.constraintsUnavailable
+                : ['nautical_fairways', 'bathymetric_depth', 'vessel_draft']
+              ).map((un, i) => (
+                <span key={i} className="text-[9px] bg-slate-100 text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded-md font-mono">
+                  {un.replaceAll('_', ' ')}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Explicit Non-Navigational Notice */}
+          <div className="text-[10px] text-amber-950 bg-amber-50 p-2.5 rounded-xl border border-amber-300/80 font-medium leading-snug space-y-1">
+            <strong className="block text-amber-900 font-bold">
+              Provisional corridor — not certified nautical navigation.
+            </strong>
+            <p className="text-[9px] text-amber-800 leading-tight">
+              Do not present or use this corridor as a navigationally safe route. Certified nautical charts and bridge navigation systems must be used.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Aivana Ocean AI Launcher */}
+      <div className="absolute bottom-6 right-6 z-[3000]">
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setIsAivanaOpen((open) => !open)}
+          className="flex items-center gap-2.5 rounded-full bg-slate-900/95 hover:bg-black text-white px-5 py-3 shadow-2xl border border-white/20 backdrop-blur-md font-bold text-xs group transition-all"
+          aria-label="Aivana Ocean AI Assistant"
+        >
+          <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/50">
+            <Sparkles size={13} className="text-white" />
+          </div>
+          <span>Aivana Ocean AI</span>
+          <span className="text-[10px] text-cyan-300 font-mono font-bold bg-white/10 px-2 py-0.5 rounded-full">
+            {activityContext?.activity ? activityIntelligence.label : 'VOICE'}
+          </span>
+        </motion.button>
+      </div>
+
+      {/* Aivana Ocean AI Modal Overlay */}
+      <AnimatePresence>
+        {isAivanaOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[5500] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="relative w-full max-w-6xl max-h-[90vh] bg-white rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-slate-900 flex items-center justify-center text-cyan-400">
+                    <Sparkles size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 tracking-tight">
+                      ORCA Aivana Voice &amp; Activity Intelligence
+                    </h3>
+                    <p className="text-[10px] font-medium text-slate-500">
+                      Talk to Aivana or pick an activity to update GIS command layers and safety context
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAivanaOpen(false)}
+                  className="w-8 h-8 rounded-full bg-slate-200/80 hover:bg-slate-300 text-slate-700 flex items-center justify-center text-sm font-black transition-colors"
+                  aria-label="Close Aivana"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+                <AivanaVoiceInterface />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }

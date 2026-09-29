@@ -12,6 +12,7 @@ import {
   ArrowRight,
   RotateCcw,
   AlertTriangle,
+  Navigation,
 } from 'lucide-react'
 import { useScenario } from '../context/ScenarioContext'
 import { MARINE_OPERATING_LOCATIONS } from '../data/marineOperatingLocations'
@@ -25,6 +26,10 @@ import {
   interpretAivanaRequest,
   AIVANA_INTENTS,
 } from '../services/aivanaInterpreter'
+import {
+  resolveRoutingRequirement,
+  planMarineRoute,
+} from '../services/marineRouting'
 import { requestBrowserLocation } from '../utils/browserGeolocation'
 import {
   formatMarineOperatingLocationDistance,
@@ -124,6 +129,17 @@ export default function AivanaVoiceInterface({
     setSelectedOperatingLocation,
     userCoordinates,
     setUserCoordinates,
+    activityContext,
+    setActivityContext,
+    updateActivityContext,
+    setAssistantTask,
+    setAssistantConversation,
+    routePlan,
+    setRoutePlan,
+    setRouteRequest,
+    clearRoutePlan,
+    locationDecision,
+    officialPfz,
   } = useScenario()
 
   // Local state for standalone preview if external props are not provided
@@ -240,6 +256,26 @@ export default function AivanaVoiceInterface({
   const applyInterpretationResult = (interpretation) => {
     if (!interpretation) return
 
+    // Update shared activity context and assistant task in ScenarioContext
+    if (interpretation.activityContext && setActivityContext) {
+      setActivityContext(interpretation.activityContext)
+    }
+
+    if (setAssistantTask) {
+      setAssistantTask({
+        query: transcript || pendingPrompt || textInput,
+        intent: interpretation.intent,
+        activity: interpretation.activityContext?.activity,
+        objective: interpretation.activityContext?.objective,
+        origin: interpretation.activityContext?.origin,
+        destination: interpretation.activityContext?.destination,
+        operatingLocation: interpretation.resolvedLocation || interpretation.activityContext?.operatingLocation,
+        status: interpretation.status,
+        clarificationQuestion: interpretation.clarificationQuestion,
+        timestamp: Date.now(),
+      })
+    }
+
     if (interpretation.status === 'CLARIFICATION') {
       setLocalState('clarification')
       setLocalClarificationQuestion(interpretation.clarificationQuestion)
@@ -279,35 +315,113 @@ export default function AivanaVoiceInterface({
         return
       }
 
+      // Deterministic routing evaluation via Universal Marine Routing Engine
+      let plan = null
+      let routingReq = null
+      try {
+        const queryText = localTranscript || pendingPrompt || ''
+        routingReq = resolveRoutingRequirement(queryText, {
+          activityContext: interpretation.activityContext,
+          operatingLocation: interpretation.resolvedLocation || selectedOperatingLocation,
+          activePfz: officialPfz,
+        })
+
+        if (routingReq?.isRoutingRequired && routingReq.routeRequest && setRoutePlan) {
+          plan = planMarineRoute(routingReq.routeRequest, {
+            locationDecision,
+            officialPfz,
+          })
+          setRouteRequest?.(routingReq.routeRequest)
+          setRoutePlan?.(plan)
+        } else if (routingReq?.isRoutingRequired === false && clearRoutePlan) {
+          clearRoutePlan()
+        }
+      } catch (err) {
+        console.warn('Aivana routing resolution skipped:', err)
+      }
+
       let explanation = ''
-      switch (interpretation.intent) {
-        case AIVANA_INTENTS.FISHING:
-          explanation = `Request understood: Fishing operation for ${interpretation.resolvedLocation?.name || 'selected area'}. Marine intelligence context ready.`
-          break
-        case AIVANA_INTENTS.PORT_MOVEMENT:
-          explanation = `Request understood: Port movement at ${interpretation.resolvedLocation?.name || 'selected port'}. Harbour parameters ready.`
-          break
-        case AIVANA_INTENTS.TRAVEL:
-          explanation = `Request understood: Sea travel for ${interpretation.resolvedLocation?.name || 'selected area'}. Marine safety parameters ready.`
-          break
-        case AIVANA_INTENTS.MARINE_SAFETY:
-          explanation = `Request understood: Marine safety & hazard check for ${interpretation.resolvedLocation?.name || 'selected area'}. Ready for review.`
-          break
-        case AIVANA_INTENTS.ORCA_CAPABILITIES:
-          explanation =
-            'ORCA is an agentic ocean intelligence platform synthesizing satellite observations, coastal ocean models, weather hazards, and geofencing to protect marine operations.'
-          break
-        case AIVANA_INTENTS.OCEAN_EXPLORATION:
-          explanation =
-            'Indian Ocean intelligence monitoring active across the Arabian Sea, Bay of Bengal, and coastal zones.'
-          break
-        default:
-          if (interpretation.resolvedLocation) {
-            explanation = `Operating location set to ${interpretation.resolvedLocation.name}. Marine intelligence context ready.`
+
+      // Phase 5B: Truthful explanations for active routing
+      if (plan && plan.routeRequest) {
+        const activity = plan.routeRequest.activity
+        if (activity === 'fishing') {
+          if (plan.pfzCandidates && plan.pfzCandidates.length > 0) {
+            const count = plan.pfzCandidates.length
+            const targetName = plan.selectedPfz?.name || plan.selectedPfz?.id || 'Zone'
+            const dist = plan.geometry?.distanceNm?.toFixed(1) ?? '—'
+            const bearing = plan.evaluation?.bearingDeg != null ? `${plan.evaluation.bearingDeg}° ${plan.evaluation.bearingCardinal ?? ''}` : 'seaward'
+            explanation = `I evaluated ${count} official INCOIS PFZ candidate${count > 1 ? 's' : ''}. Candidate ${targetName} is the closest at ${dist} NM (bearing ${bearing}). Evaluation status: ${plan.recommendation?.state}. ${plan.recommendation?.reason} The corridor shown is provisional and NOT certified nautical navigation; bathymetry and vessel-specific constraints are unavailable.`
           } else {
-            explanation = `Request understood for ${interpretation.resolvedLocation ? interpretation.resolvedLocation.name : 'Indian Ocean'}. Ready for analysis.`
+            explanation = `Official INCOIS PFZ features were queried for ${interpretation.resolvedLocation?.name || 'the operational area'}. No active official PFZ candidates are currently available. The displayed corridor is provisional only.`
           }
-          break
+        } else if (activity === 'marine_travel') {
+          const orig = plan.origin?.name?.replace(' Port Authority', '') || 'Origin'
+          const dest = plan.destination?.name?.replace(' Port Authority', '') || 'Destination'
+          const origSummary = plan.endpointAssessment?.origin?.summary || 'origin conditions evaluated'
+          const destSummary = plan.endpointAssessment?.destination?.summary || 'destination conditions evaluated'
+          const dist = plan.geometry?.distanceNm?.toFixed(1) ?? '—'
+          explanation = `I evaluated available environmental conditions for marine travel from ${orig} to ${dest}. Origin: ${origSummary}. Destination: ${destSummary}. Evaluation status: ${plan.recommendation?.state}. The reference corridor (${dist} NM) is provisional only. Authoritative water-only navigation routing is unavailable with current data.`
+        } else if (activity === 'port_movement') {
+          const portName = plan.destination?.name?.replace(' Port Authority', '') || 'port'
+          explanation = `Port approach corridor evaluated for ${portName}. Evaluation status: ${plan.recommendation?.state}. ${plan.recommendation?.reason} Berth-level piloting, inner-harbour channels, and docking clearance remain unavailable.`
+        } else if (activity === 'ocean_exploration') {
+          const targetName = plan.target?.name || 'exploration area'
+          const dist = plan.geometry?.distanceNm?.toFixed(1) ?? '—'
+          explanation = `Ocean exploration reference corridor evaluated to ${targetName} (${dist} NM). Status: ${plan.recommendation?.state}. ${plan.recommendation?.reason} Certified nautical navigation and research cruise clearance remain unavailable.`
+        } else {
+          explanation = `Provisional corridor evaluated for ${plan.routeRequest.activity?.replaceAll('_', ' ')}. Reference distance: ${plan.geometry?.distanceNm?.toFixed(1)} NM. Status: ${plan.recommendation?.state}. Provisional reference only.`
+        }
+      } else if (routingReq?.status === 'CLARIFICATION_REQUIRED' && routingReq.clarificationQuestion) {
+        explanation = routingReq.clarificationQuestion
+        setLocalClarificationQuestion(routingReq.clarificationQuestion)
+        setLocalState('clarification')
+        setLocalAssistantMessage(explanation)
+        speak(explanation)
+        return
+      } else {
+        // Standard conversational interpretations when no routing is executed
+        if (interpretation.activityContext?.activity === 'marine_travel') {
+          const originName = interpretation.activityContext.origin?.name?.replace(' Port Authority', '')
+          const destName = interpretation.activityContext.destination?.name?.replace(' Port Authority', '')
+          if (originName && destName) {
+            explanation = `Request understood: Marine travel from ${originName} to ${destName}. Route and voyage conditions ready.`
+          } else if (destName) {
+            explanation = `Request understood: Marine travel to ${destName}. Destination conditions ready.`
+          } else {
+            explanation = `Request understood: Sea travel for ${interpretation.resolvedLocation?.name || 'selected area'}. Marine safety parameters ready.`
+          }
+        } else {
+          switch (interpretation.intent) {
+            case AIVANA_INTENTS.FISHING:
+              explanation = `Request understood: Fishing operation for ${interpretation.resolvedLocation?.name || 'selected area'}. Marine intelligence context ready.`
+              break
+            case AIVANA_INTENTS.PORT_MOVEMENT:
+              explanation = `Request understood: Port movement at ${interpretation.resolvedLocation?.name || 'selected port'}. Harbour parameters ready.`
+              break
+            case AIVANA_INTENTS.TRAVEL:
+              explanation = `Request understood: Sea travel for ${interpretation.resolvedLocation?.name || 'selected area'}. Marine safety parameters ready.`
+              break
+            case AIVANA_INTENTS.MARINE_SAFETY:
+              explanation = `Request understood: Marine safety & hazard check for ${interpretation.resolvedLocation?.name || 'selected area'}. Ready for review.`
+              break
+            case AIVANA_INTENTS.ORCA_CAPABILITIES:
+              explanation =
+                'ORCA is an agentic ocean intelligence platform synthesizing satellite observations, coastal ocean models, weather hazards, and geofencing to protect marine operations.'
+              break
+            case AIVANA_INTENTS.OCEAN_EXPLORATION:
+              explanation =
+                'Indian Ocean intelligence monitoring active across the Arabian Sea, Bay of Bengal, and coastal zones.'
+              break
+            default:
+              if (interpretation.resolvedLocation) {
+                explanation = `Operating location set to ${interpretation.resolvedLocation.name}. Marine intelligence context ready.`
+              } else {
+                explanation = `Request understood for ${interpretation.resolvedLocation ? interpretation.resolvedLocation.name : 'Indian Ocean'}. Ready for analysis.`
+              }
+              break
+          }
+        }
       }
 
       setLocalAssistantMessage(explanation)
@@ -441,6 +555,18 @@ export default function AivanaVoiceInterface({
     setPendingPrompt('')
     setShowNearbyPorts(false)
     setDestinationNotice(null)
+    if (clearRoutePlan) {
+      clearRoutePlan()
+    }
+    if (setActivityContext) {
+      setActivityContext({
+        activity: null,
+        objective: null,
+        origin: null,
+        destination: null,
+        operatingLocation: null,
+      })
+    }
   }
 
   // Filter canonical ports for clarification chips
@@ -694,10 +820,49 @@ export default function AivanaVoiceInterface({
                         </div>
                       </div>
                     )}
+                    {activityContext?.activity && (
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-blue-800 bg-blue-50/90 px-2.5 py-1 rounded-lg border border-blue-200/80">
+                        <Compass size={12} className="text-blue-600 shrink-0" />
+                        <span>Current activity: {activityContext.activity === 'marine_travel' ? 'Marine Travel' : activityContext.activity === 'fishing' ? 'Fishing' : activityContext.activity === 'port_movement' ? 'Port Movement' : activityContext.activity === 'marine_safety' ? 'Marine Safety' : activityContext.activity === 'ocean_exploration' ? 'Ocean Exploration' : 'General Maritime'}</span>
+                        {activityContext.origin && (
+                          <span className="text-slate-600 font-medium ml-1">
+                            From: <strong className="text-slate-900 font-bold">{activityContext.origin.name.replace(' Port Authority', '')}</strong>
+                          </span>
+                        )}
+                        {activityContext.destination && (
+                          <span className="text-slate-600 font-medium ml-1">
+                            To: <strong className="text-slate-900 font-bold">{activityContext.destination.name.replace(' Port Authority', '')}</strong>
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {selectedOperatingLocation && (
                       <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
                         <MapPin size={12} />
                         <span>Active Location: {selectedOperatingLocation.name}</span>
+                      </div>
+                    )}
+                    {routePlan?.geometry && (
+                      <div className="p-3 rounded-2xl bg-cyan-50/90 border border-cyan-200/90 text-xs space-y-1.5 mt-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 font-bold text-cyan-950">
+                            <Navigation size={13} className="text-cyan-600" />
+                            <span>Provisional Route Corridor</span>
+                          </div>
+                          <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                            routePlan.recommendation?.recommended
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {routePlan.status.replaceAll('_', ' ')}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-700 font-medium">
+                          Distance: <strong className="font-bold text-slate-900">{routePlan.geometry.distanceNm.toFixed(1)} NM</strong> • Recommendation: {routePlan.recommendation?.reason || 'Provisional evaluation ready.'}
+                        </div>
+                        <div className="text-[10px] text-slate-500 italic bg-white/70 p-2 rounded-xl border border-cyan-100/80 leading-normal">
+                          ⚠️ {routePlan.geometry.disclaimer}
+                        </div>
                       </div>
                     )}
                     <div className="flex flex-wrap items-center gap-2 pt-1">

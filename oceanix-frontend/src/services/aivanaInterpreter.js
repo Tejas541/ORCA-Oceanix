@@ -1,5 +1,38 @@
 import { MARINE_OPERATING_LOCATIONS } from '../data/marineOperatingLocations.js'
 
+export const CANONICAL_ACTIVITIES = Object.freeze({
+  FISHING: 'fishing',
+  MARINE_TRAVEL: 'marine_travel',
+  PORT_MOVEMENT: 'port_movement',
+  MARINE_SAFETY: 'marine_safety',
+  OCEAN_EXPLORATION: 'ocean_exploration',
+  OTHER: 'other',
+})
+
+export const DEFAULT_ACTIVITY_CONTEXT = Object.freeze({
+  activity: null,
+  objective: null,
+  origin: null,
+  destination: null,
+  operatingLocation: null,
+})
+
+export function createActivityContext({
+  activity = null,
+  objective = null,
+  origin = null,
+  destination = null,
+  operatingLocation = null,
+} = {}) {
+  return Object.freeze({
+    activity,
+    objective,
+    origin,
+    destination,
+    operatingLocation,
+  })
+}
+
 export const AIVANA_INTENTS = Object.freeze({
   FISHING: 'fishing',
   TRAVEL: 'travel',
@@ -13,6 +46,9 @@ export const AIVANA_INTENTS = Object.freeze({
 })
 
 export const CLARIFICATION_QUESTION = 'Which operating area or port should I analyze?'
+export const DESTINATION_CLARIFICATION_QUESTION = 'Which destination are you travelling to?'
+export const ACTIVITY_CLARIFICATION_QUESTION =
+  'Could you clarify what marine activity you want to perform? (e.g., fishing, marine travel, port movement, safety assessment, or ocean exploration)'
 
 /**
  * Mapping of canonical operating location IDs to recognition aliases.
@@ -123,7 +159,83 @@ export function resolveOperatingLocationFromText(text) {
 }
 
 /**
- * Determines whether a query string represents a canonical operating location.
+ * Cleans extracted endpoint candidate strings of trailing punctuation and marine transport filler words.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function cleanLocationCandidate(str) {
+  if (!str) return ''
+  return str
+    .replace(/\b(?:by\s+sea|by\s+boat|by\s+ship|by\s+water|by\s+vessel)\b/gi, '')
+    .replace(/[.,!?;:]+$/, '')
+    .trim()
+}
+
+/**
+ * Extracts travel origin and destination endpoints from marine travel queries.
+ *
+ * @param {string} rawQuery
+ * @returns {{ origin: object|null, destination: object|null, rawOrigin: string|null, rawDestination: string|null }}
+ */
+export function extractTravelEndpoints(rawQuery) {
+  if (!rawQuery || typeof rawQuery !== 'string') {
+    return { origin: null, destination: null, rawOrigin: null, rawDestination: null }
+  }
+  const query = rawQuery.trim()
+
+  // Pattern 1: from <origin> to <destination>
+  // e.g. "travel from Mumbai to Goa", "from Mumbai to Goa by sea"
+  const fromToMatch = query.match(
+    /\bfrom\s+([^,.\n]+?)\s+to\s+([^,.\n]+?)(?:\s+(?:by\s+sea|by\s+boat|by\s+ship|by\s+vessel)|\b|[.?!]|$)/i
+  )
+  if (fromToMatch) {
+    const rawOrigin = cleanLocationCandidate(fromToMatch[1])
+    const rawDestination = cleanLocationCandidate(fromToMatch[2])
+    const origin = resolveOperatingLocationFromText(rawOrigin)
+    const destination = resolveOperatingLocationFromText(rawDestination)
+    return { origin, destination, rawOrigin, rawDestination }
+  }
+
+  // Pattern 2: to <destination> from <origin>
+  const toFromMatch = query.match(
+    /\bto\s+([^,.\n]+?)\s+from\s+([^,.\n]+?)(?:\s+(?:by\s+sea|by\s+boat|by\s+ship|by\s+vessel)|\b|[.?!]|$)/i
+  )
+  if (toFromMatch) {
+    const rawDestination = cleanLocationCandidate(toFromMatch[1])
+    const rawOrigin = cleanLocationCandidate(toFromMatch[2])
+    const destination = resolveOperatingLocationFromText(rawDestination)
+    const origin = resolveOperatingLocationFromText(rawOrigin)
+    return { origin, destination, rawOrigin, rawDestination }
+  }
+
+  // Pattern 3: to <destination> (without origin)
+  // e.g. "travelling to Goa", "travel to Goa", "navigate to Goa", "sail to Goa", "conditions for travelling to Goa"
+  const toMatch = query.match(
+    /\b(?:travel(?:l?ing)?|go(?:ing)?|voyage|passage|transit|sail(?:ing)?|route|head(?:ing)?|navigate|take me)\s+to\s+([^,.\n]+?)(?:\s+(?:by\s+sea|by\s+boat|by\s+ship|by\s+vessel)|\b|[.?!]|$)/i
+  )
+  if (toMatch) {
+    const rawDestination = cleanLocationCandidate(toMatch[1])
+    const destination = resolveOperatingLocationFromText(rawDestination)
+    return { origin: null, destination, rawOrigin: null, rawDestination }
+  }
+
+  // Pattern 4: from <origin> (without destination)
+  // e.g. "travel from Mumbai", "sail from Kochi"
+  const fromMatch = query.match(
+    /\b(?:travel(?:l?ing)?|go(?:ing)?|voyage|passage|transit|sail(?:ing)?|route|head(?:ing)?|navigate)\s+from\s+([^,.\n]+?)(?:\s+(?:by\s+sea|by\s+boat|by\s+ship|by\s+vessel)|\b|[.?!]|$)/i
+  )
+  if (fromMatch) {
+    const rawOrigin = cleanLocationCandidate(fromMatch[1])
+    const origin = resolveOperatingLocationFromText(rawOrigin)
+    return { origin, destination: null, rawOrigin, rawDestination: null }
+  }
+
+  return { origin: null, destination: null, rawOrigin: null, rawDestination: null }
+}
+
+/**
+ * Determines whether an input represents a canonical operating location record.
  *
  * @param {object|string|null} locationInput
  * @returns {object|null}
@@ -173,7 +285,7 @@ export function detectAivanaIntent(rawQuery) {
     return AIVANA_INTENTS.ORCA_CAPABILITIES
   }
 
-  // Ocean Exploration (general Indian Ocean queries without operational intent)
+  // Ocean Exploration (general Indian Ocean queries or exploration requests)
   if (
     query.includes('explore the indian ocean') ||
     query.includes('tell me about the indian ocean') ||
@@ -181,7 +293,12 @@ export function detectAivanaIntent(rawQuery) {
     query.includes('indian ocean regions') ||
     query.includes('insights on regions') ||
     query.startsWith('explore the ocean') ||
-    query === 'indian ocean'
+    query === 'indian ocean' ||
+    query.includes('explore this area') ||
+    query.includes('ocean conditions') ||
+    query.includes('sea conditions') ||
+    query.includes('explore') ||
+    query.includes('exploration')
   ) {
     return AIVANA_INTENTS.OCEAN_EXPLORATION
   }
@@ -199,6 +316,21 @@ export function detectAivanaIntent(rawQuery) {
     return AIVANA_INTENTS.NEARBY_PORTS
   }
 
+  // Fishing Operations
+  if (
+    query.includes('fish') ||
+    query.includes('pfz') ||
+    query.includes('potential fishing zone') ||
+    query.includes('tuna') ||
+    query.includes('catch') ||
+    query.includes('trawler') ||
+    query.includes('fishing operation') ||
+    query.includes('fishing trip') ||
+    query.includes('fishing conditions')
+  ) {
+    return AIVANA_INTENTS.FISHING
+  }
+
   // Destination / Navigation requests (distinct from ORCA operating location)
   if (
     query.startsWith('take me to') ||
@@ -211,21 +343,7 @@ export function detectAivanaIntent(rawQuery) {
     return AIVANA_INTENTS.DESTINATION_NAVIGATION
   }
 
-  // Fishing Operations
-  if (
-    query.includes('fish') ||
-    query.includes('pfz') ||
-    query.includes('potential fishing zone') ||
-    query.includes('tuna') ||
-    query.includes('catch') ||
-    query.includes('trawler') ||
-    query.includes('fishing operation') ||
-    query.includes('fishing trip')
-  ) {
-    return AIVANA_INTENTS.FISHING
-  }
-
-  // Port Movement / Port Conditions
+  // Port Movement / Port Conditions / Berth / Dock / Port Entry
   if (
     query.includes('port condition') ||
     query.includes('port movement') ||
@@ -236,6 +354,16 @@ export function detectAivanaIntent(rawQuery) {
     query.includes('at the port') ||
     query.includes('port weather') ||
     query.includes('check port') ||
+    query.includes('port entry') ||
+    query.includes('harbour entry') ||
+    query.includes('harbor entry') ||
+    query.includes('entering') ||
+    query.includes('moving my vessel') ||
+    query.includes('move my vessel') ||
+    query.includes('vessel into') ||
+    query.includes('enter port') ||
+    query.includes('enter ') ||
+    query.includes('into port') ||
     /\bconditions at .* port\b/.test(query)
   ) {
     return AIVANA_INTENTS.PORT_MOVEMENT
@@ -251,12 +379,14 @@ export function detectAivanaIntent(rawQuery) {
     query.includes('passage') ||
     query.includes('transit') ||
     query.includes('route risk') ||
-    query.includes('plan route')
+    query.includes('plan route') ||
+    query.includes('by sea') ||
+    /\bgo from\b.*\bto\b/.test(query)
   ) {
     return AIVANA_INTENTS.TRAVEL
   }
 
-  // Marine Safety / Alerts
+  // Marine Safety / Alerts / Safe to operate
   if (
     query.includes('safety') ||
     query.includes('stay safe') ||
@@ -266,7 +396,12 @@ export function detectAivanaIntent(rawQuery) {
     query.includes('advisory') ||
     query.includes('hazard') ||
     query.includes('cyclone') ||
-    query.includes('warning')
+    query.includes('warning') ||
+    query.includes('safe to operate') ||
+    query.includes('safely operate') ||
+    query.includes('is it safe') ||
+    query.includes('can i operate safely') ||
+    query.includes('safe here')
   ) {
     return AIVANA_INTENTS.MARINE_SAFETY
   }
@@ -309,7 +444,7 @@ export function requiresOperatingLocationForIntent(intent) {
  * @param {string} query User query (voice transcript or text input)
  * @param {object|string|null} [explicitLocation] Explicit location provided by UI
  * @param {object|null} [activeLocation] Current ScenarioContext selectedOperatingLocation
- * @returns {object} Structured Aivana task/interpretation result
+ * @returns {object} Structured Aivana task/interpretation result including canonical activityContext
  */
 export function interpretAivanaRequest(query, explicitLocation = null, activeLocation = null) {
   // 1. Validate query
@@ -319,8 +454,11 @@ export function interpretAivanaRequest(query, explicitLocation = null, activeLoc
       requiresOperatingLocation: false,
       explicitLocation: null,
       resolvedLocation: null,
+      origin: null,
+      destination: null,
       status: 'IDLE',
       clarificationQuestion: null,
+      activityContext: { ...DEFAULT_ACTIVITY_CONTEXT },
     }
   }
 
@@ -328,38 +466,8 @@ export function interpretAivanaRequest(query, explicitLocation = null, activeLoc
 
   // 2. Classify intent
   const intent = detectAivanaIntent(trimmedQuery)
-  const requiresOperatingLocation = requiresOperatingLocationForIntent(intent)
 
-  // Special handling for Destination / Navigation requests:
-  // Distinct from ORCA operating locations. Does NOT automatically treat destination as operating location.
-  if (intent === AIVANA_INTENTS.DESTINATION_NAVIGATION) {
-    const destinationLocation = resolveOperatingLocationFromText(trimmedQuery)
-    return {
-      intent,
-      requiresOperatingLocation: false,
-      destination: destinationLocation,
-      explicitLocation: null,
-      resolvedLocation: activeLocation ? normalizeOperatingLocation(activeLocation) : null,
-      status: 'READY',
-      clarificationQuestion: null,
-    }
-  }
-
-  // Special handling for Nearby Ports discovery
-  if (intent === AIVANA_INTENTS.NEARBY_PORTS) {
-    return {
-      intent,
-      requiresOperatingLocation: false,
-      destination: null,
-      explicitLocation: null,
-      resolvedLocation: activeLocation ? normalizeOperatingLocation(activeLocation) : null,
-      status: 'READY',
-      clarificationQuestion: null,
-    }
-  }
-
-  // 3. Location Resolution Priority
-  // Priority 1: Explicit location supplied separately by UI
+  // 3. Location Resolution Priority helpers
   let normalizedExplicit = normalizeOperatingLocation(explicitLocation)
   let resolvedLocation = null
   let explicitSource = null
@@ -369,7 +477,7 @@ export function interpretAivanaRequest(query, explicitLocation = null, activeLoc
     explicitSource = normalizedExplicit
   }
 
-  // Priority 2: Explicit location detected in user query
+  // Query-level location resolution (used by fishing, port movement, marine safety)
   if (!resolvedLocation) {
     const detectedInQuery = resolveOperatingLocationFromText(trimmedQuery)
     if (detectedInQuery) {
@@ -378,7 +486,7 @@ export function interpretAivanaRequest(query, explicitLocation = null, activeLoc
     }
   }
 
-  // Priority 3: Active ScenarioContext location (only if valid canonical location exists)
+  // Active location fallback
   if (!resolvedLocation && activeLocation) {
     const normalizedActive = normalizeOperatingLocation(activeLocation)
     if (normalizedActive) {
@@ -386,24 +494,347 @@ export function interpretAivanaRequest(query, explicitLocation = null, activeLoc
     }
   }
 
-  // 4. Determine status and clarification
-  if (requiresOperatingLocation && !resolvedLocation) {
+  // --- SPECIAL HANDLING: TRAVEL / DESTINATION NAVIGATION ---
+  if (intent === AIVANA_INTENTS.TRAVEL || intent === AIVANA_INTENTS.DESTINATION_NAVIGATION) {
+    const endpoints = extractTravelEndpoints(trimmedQuery)
+    const destinationLocation =
+      endpoints.destination || (intent === AIVANA_INTENTS.DESTINATION_NAVIGATION ? resolveOperatingLocationFromText(trimmedQuery) : null)
+    const originLocation = endpoints.origin
+
+    // Case A: Both origin and destination are present
+    if (originLocation && destinationLocation) {
+      const activityContext = createActivityContext({
+        activity: CANONICAL_ACTIVITIES.MARINE_TRAVEL,
+        objective: 'travel',
+        origin: originLocation,
+        destination: destinationLocation,
+        operatingLocation: null,
+      })
+      return {
+        intent: AIVANA_INTENTS.TRAVEL,
+        requiresOperatingLocation: false,
+        origin: originLocation,
+        destination: destinationLocation,
+        explicitLocation: explicitSource,
+        resolvedLocation: null,
+        status: 'READY',
+        clarificationQuestion: null,
+        activityContext,
+      }
+    }
+
+    // Case B: Destination is present, origin is null
+    if (destinationLocation) {
+      const activityContext = createActivityContext({
+        activity: CANONICAL_ACTIVITIES.MARINE_TRAVEL,
+        objective: 'travel',
+        origin: null,
+        destination: destinationLocation,
+        operatingLocation: null,
+      })
+      return {
+        intent: intent === AIVANA_INTENTS.DESTINATION_NAVIGATION ? AIVANA_INTENTS.DESTINATION_NAVIGATION : AIVANA_INTENTS.TRAVEL,
+        requiresOperatingLocation: false,
+        origin: null,
+        destination: destinationLocation,
+        explicitLocation: explicitSource,
+        resolvedLocation: null,
+        status: 'READY',
+        clarificationQuestion: null,
+        activityContext,
+      }
+    }
+
+    // Case C: Origin is present but destination is missing
+    if (originLocation) {
+      const activityContext = createActivityContext({
+        activity: CANONICAL_ACTIVITIES.MARINE_TRAVEL,
+        objective: 'travel',
+        origin: originLocation,
+        destination: null,
+        operatingLocation: null,
+      })
+      return {
+        intent: AIVANA_INTENTS.TRAVEL,
+        requiresOperatingLocation: true,
+        origin: originLocation,
+        destination: null,
+        explicitLocation: explicitSource,
+        resolvedLocation: null,
+        status: 'CLARIFICATION',
+        clarificationQuestion: DESTINATION_CLARIFICATION_QUESTION,
+        activityContext,
+      }
+    }
+
+    // Case D: General travel request with resolved single location (e.g. activeLocation)
+    if (resolvedLocation) {
+      const activityContext = createActivityContext({
+        activity: CANONICAL_ACTIVITIES.MARINE_TRAVEL,
+        objective: 'travel',
+        origin: null,
+        destination: null,
+        operatingLocation: resolvedLocation,
+      })
+      return {
+        intent: AIVANA_INTENTS.TRAVEL,
+        requiresOperatingLocation: true,
+        origin: null,
+        destination: null,
+        explicitLocation: explicitSource,
+        resolvedLocation,
+        status: 'READY',
+        clarificationQuestion: null,
+        activityContext,
+      }
+    }
+
+    // Case E: General travel request without any location or destination -> CLARIFICATION
+    const activityContext = createActivityContext({
+      activity: CANONICAL_ACTIVITIES.MARINE_TRAVEL,
+      objective: 'travel',
+      origin: null,
+      destination: null,
+      operatingLocation: null,
+    })
+    return {
+      intent: AIVANA_INTENTS.TRAVEL,
+      requiresOperatingLocation: true,
+      origin: null,
+      destination: null,
+      explicitLocation: null,
+      resolvedLocation: null,
+      status: 'CLARIFICATION',
+      clarificationQuestion: CLARIFICATION_QUESTION,
+      activityContext,
+    }
+  }
+
+  // --- SPECIAL HANDLING: NEARBY PORTS ---
+  if (intent === AIVANA_INTENTS.NEARBY_PORTS) {
+    const activityContext = createActivityContext({
+      activity: CANONICAL_ACTIVITIES.OTHER,
+      objective: 'nearby ports discovery',
+      origin: null,
+      destination: null,
+      operatingLocation: activeLocation ? normalizeOperatingLocation(activeLocation) : null,
+    })
+    return {
+      intent,
+      requiresOperatingLocation: false,
+      origin: null,
+      destination: null,
+      explicitLocation: null,
+      resolvedLocation: activeLocation ? normalizeOperatingLocation(activeLocation) : null,
+      status: 'READY',
+      clarificationQuestion: null,
+      activityContext,
+    }
+  }
+
+  // --- SPECIAL HANDLING: ORCA CAPABILITIES ---
+  if (intent === AIVANA_INTENTS.ORCA_CAPABILITIES) {
+    const activityContext = createActivityContext({
+      activity: CANONICAL_ACTIVITIES.OTHER,
+      objective: 'orca capabilities',
+      origin: null,
+      destination: null,
+      operatingLocation: null,
+    })
+    return {
+      intent,
+      requiresOperatingLocation: false,
+      origin: null,
+      destination: null,
+      explicitLocation: null,
+      resolvedLocation: null,
+      status: 'READY',
+      clarificationQuestion: null,
+      activityContext,
+    }
+  }
+
+  // --- SPECIAL HANDLING: OCEAN EXPLORATION ---
+  if (intent === AIVANA_INTENTS.OCEAN_EXPLORATION) {
+    const activityContext = createActivityContext({
+      activity: CANONICAL_ACTIVITIES.OCEAN_EXPLORATION,
+      objective: 'ocean exploration',
+      origin: null,
+      destination: null,
+      operatingLocation: resolvedLocation || null,
+    })
+    return {
+      intent,
+      requiresOperatingLocation: false,
+      origin: null,
+      destination: null,
+      explicitLocation: explicitSource,
+      resolvedLocation: resolvedLocation || null,
+      status: 'READY',
+      clarificationQuestion: null,
+      activityContext,
+    }
+  }
+
+  // --- SPECIAL HANDLING: FISHING ---
+  if (intent === AIVANA_INTENTS.FISHING) {
+    if (resolvedLocation) {
+      const activityContext = createActivityContext({
+        activity: CANONICAL_ACTIVITIES.FISHING,
+        objective: 'fishing',
+        origin: null,
+        destination: null,
+        operatingLocation: resolvedLocation,
+      })
+      return {
+        intent,
+        requiresOperatingLocation: true,
+        origin: null,
+        destination: null,
+        explicitLocation: explicitSource,
+        resolvedLocation,
+        status: 'READY',
+        clarificationQuestion: null,
+        activityContext,
+      }
+    }
+    const activityContext = createActivityContext({
+      activity: CANONICAL_ACTIVITIES.FISHING,
+      objective: 'fishing',
+      origin: null,
+      destination: null,
+      operatingLocation: null,
+    })
     return {
       intent,
       requiresOperatingLocation: true,
+      origin: null,
+      destination: null,
       explicitLocation: explicitSource,
       resolvedLocation: null,
       status: 'CLARIFICATION',
       clarificationQuestion: CLARIFICATION_QUESTION,
+      activityContext,
     }
   }
 
+  // --- SPECIAL HANDLING: PORT MOVEMENT ---
+  if (intent === AIVANA_INTENTS.PORT_MOVEMENT) {
+    if (resolvedLocation) {
+      const activityContext = createActivityContext({
+        activity: CANONICAL_ACTIVITIES.PORT_MOVEMENT,
+        objective: 'port movement',
+        origin: null,
+        destination: null,
+        operatingLocation: resolvedLocation,
+      })
+      return {
+        intent,
+        requiresOperatingLocation: true,
+        origin: null,
+        destination: null,
+        explicitLocation: explicitSource,
+        resolvedLocation,
+        status: 'READY',
+        clarificationQuestion: null,
+        activityContext,
+      }
+    }
+    const activityContext = createActivityContext({
+      activity: CANONICAL_ACTIVITIES.PORT_MOVEMENT,
+      objective: 'port movement',
+      origin: null,
+      destination: null,
+      operatingLocation: null,
+    })
+    return {
+      intent,
+      requiresOperatingLocation: true,
+      origin: null,
+      destination: null,
+      explicitLocation: explicitSource,
+      resolvedLocation: null,
+      status: 'CLARIFICATION',
+      clarificationQuestion: CLARIFICATION_QUESTION,
+      activityContext,
+    }
+  }
+
+  // --- SPECIAL HANDLING: MARINE SAFETY ---
+  if (intent === AIVANA_INTENTS.MARINE_SAFETY) {
+    if (resolvedLocation) {
+      const activityContext = createActivityContext({
+        activity: CANONICAL_ACTIVITIES.MARINE_SAFETY,
+        objective: 'safety assessment',
+        origin: null,
+        destination: null,
+        operatingLocation: resolvedLocation,
+      })
+      return {
+        intent,
+        requiresOperatingLocation: true,
+        origin: null,
+        destination: null,
+        explicitLocation: explicitSource,
+        resolvedLocation,
+        status: 'READY',
+        clarificationQuestion: null,
+        activityContext,
+      }
+    }
+    const activityContext = createActivityContext({
+      activity: CANONICAL_ACTIVITIES.MARINE_SAFETY,
+      objective: 'safety assessment',
+      origin: null,
+      destination: null,
+      operatingLocation: null,
+    })
+    return {
+      intent,
+      requiresOperatingLocation: true,
+      origin: null,
+      destination: null,
+      explicitLocation: explicitSource,
+      resolvedLocation: null,
+      status: 'CLARIFICATION',
+      clarificationQuestion: CLARIFICATION_QUESTION,
+      activityContext,
+    }
+  }
+
+  // Explicit location selection without distinct operational activity (e.g. "Use JNPA", "Select Chennai")
+  if (resolvedLocation) {
+    const activityContext = createActivityContext({
+      activity: CANONICAL_ACTIVITIES.OTHER,
+      objective: 'location selection',
+      origin: null,
+      destination: null,
+      operatingLocation: resolvedLocation,
+    })
+    return {
+      intent: AIVANA_INTENTS.OTHER,
+      requiresOperatingLocation: false,
+      origin: null,
+      destination: null,
+      explicitLocation: explicitSource,
+      resolvedLocation,
+      status: 'READY',
+      clarificationQuestion: null,
+      activityContext,
+    }
+  }
+
+  // --- UNKNOWN / UNCLEAR ACTIVITY ---
+  // "If the activity is unclear, do not guess. Return a clarification request."
   return {
-    intent,
-    requiresOperatingLocation,
-    explicitLocation: explicitSource,
-    resolvedLocation,
-    status: 'READY',
-    clarificationQuestion: null,
+    intent: AIVANA_INTENTS.OTHER,
+    requiresOperatingLocation: false,
+    origin: null,
+    destination: null,
+    explicitLocation: null,
+    resolvedLocation: null,
+    status: 'CLARIFICATION',
+    clarificationQuestion: ACTIVITY_CLARIFICATION_QUESTION,
+    activityContext: { ...DEFAULT_ACTIVITY_CONTEXT },
   }
 }
