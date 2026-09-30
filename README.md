@@ -518,32 +518,22 @@ npm run dev
 
 ---
 
-## 3. Start the backend
+### 3. Start the backend
 
 Open another terminal:
 
 ```bash
 cd oceanix-backend
 npm install
-```
 
 Start the backend:
-
-```bash
-node server.js
-```
+npm start
 
 The backend runs on:
-
-```text
 http://localhost:4000
-```
 
 Health check:
-
-```text
 http://localhost:4000/api/health
-```
 
 ---
 
