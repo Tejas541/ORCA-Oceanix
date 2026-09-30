@@ -525,15 +525,20 @@ Open another terminal:
 ```bash
 cd oceanix-backend
 npm install
-
-Start the backend:
 npm start
+```
 
 The backend runs on:
+
+```text
 http://localhost:4000
+```
 
 Health check:
+
+```text
 http://localhost:4000/api/health
+```
 
 ---
 
