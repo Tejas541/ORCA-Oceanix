@@ -42,7 +42,7 @@ const Home = () => (
         transition={{ duration: 0.7, delay: 0.15 }}
         className="mt-3 text-sm md:text-base text-slate-500 max-w-xl mx-auto leading-relaxed font-normal"
       >
-        Talk to ORCA. Get real-time insights. Make safer decisions. <br className="hidden sm:inline" />
+        Talk to OCEANIX. Get real-time insights. Make safer decisions. <br className="hidden sm:inline" />
         Built for the people who work, travel and protect our oceans.
       </motion.p>
 
@@ -91,7 +91,7 @@ function Navigation() {
   const { pathname } = useLocation()
   return (
     <nav className="fixed top-0 left-0 right-0 h-16 bg-white/70 backdrop-blur-md border-b border-slate-100 z-[5000] px-6 md:px-10 flex items-center justify-between">
-      {/* Brand: ORCA ISRO */}
+      {/* Brand: OCEANIX ISRO */}
       <Link to="/" className="flex items-center gap-2.5 group">
         <div className="w-8 h-8 rounded-lg bg-[#070e1e] border border-blue-500/30 flex items-center justify-center text-white shadow-sm shadow-blue-500/20 group-hover:border-blue-400 transition-colors">
           <svg viewBox="0 0 24 24" className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" strokeWidth="2">
@@ -107,7 +107,7 @@ function Navigation() {
           </svg>
         </div>
         <span className="font-black text-xl tracking-tight text-slate-900">
-          ORCA <span className="text-[11px] font-bold text-blue-600 ml-0.5 tracking-wider">ISRO</span>
+          OCEANIX <span className="text-[11px] font-bold text-blue-600 ml-0.5 tracking-wider">ISRO</span>
         </span>
       </Link>
 

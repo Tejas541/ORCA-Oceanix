@@ -121,7 +121,7 @@ test('GIS and Safety evidence presentation uses canonical units and four-decimal
 
 test('bulletin uses runtime evidence wording and has no literal template markers or stale date', () => {
   const source = read('./pages/AdvisoryBulletin.jsx')
-  assert.match(source, /ORCA MARINE ADVISORY/)
+  assert.match(source, /OCEANIX MARINE ADVISORY/)
   assert.match(source, /RUNTIME EVIDENCE SNAPSHOT/)
   assert.match(source, /Operating location: \{operatingLocationName\}\./)
   assert.doesNotMatch(source, /`Operating location: \$\{operatingLocationName\}/)
